@@ -122,18 +122,76 @@ export class DiffPanel {
     }
     #root { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
 
+    /* ── Summary bar ──────────────────────────────────────── */
     .summary {
-      display: flex; align-items: center; gap: 8px;
-      flex-wrap: wrap; padding: 9px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 16px;
       border-bottom: 1px solid var(--vscode-panel-border);
       flex-shrink: 0;
     }
-    .badge { padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-    .badge.add { background: #dcfce7; color: #166534; }
-    .badge.mod { background: #fef9c3; color: #854d0e; }
-    .badge.rem { background: #fee2e2; color: #991b1b; }
+    .stats {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .stat {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 6px 18px;
+      border-radius: 8px;
+      min-width: 72px;
+    }
+    .stat-num {
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      letter-spacing: -0.5px;
+    }
+    .stat-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      margin-top: 3px;
+      opacity: 0.75;
+    }
+    .stat.add { background: #dcfce7; }
+    .stat.add .stat-num   { color: #15803d; }
+    .stat.add .stat-label { color: #16a34a; }
+    .stat.mod { background: #fef9c3; }
+    .stat.mod .stat-num   { color: #a16207; }
+    .stat.mod .stat-label { color: #ca8a04; }
+    .stat.rem { background: #fee2e2; }
+    .stat.rem .stat-num   { color: #b91c1c; }
+    .stat.rem .stat-label { color: #dc2626; }
+    .stat.zero { opacity: 0.4; }
+    .stat-sep {
+      width: 1px; height: 36px;
+      background: var(--vscode-panel-border);
+      margin: 0 4px;
+    }
+    .stat.modules {
+      background: var(--vscode-input-background, #f1f5f9);
+      border: 1px solid var(--vscode-panel-border);
+    }
+    .stat.modules .stat-num   { color: var(--vscode-foreground); font-size: 18px; }
+    .stat.modules .stat-label { color: var(--vscode-descriptionForeground); }
+    .ref-badge {
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      color: var(--vscode-descriptionForeground);
+      background: var(--vscode-input-background, #f1f5f9);
+      border: 1px solid var(--vscode-panel-border);
+      padding: 4px 10px;
+      border-radius: 5px;
+      white-space: nowrap;
+    }
     .muted  { color: var(--vscode-descriptionForeground); font-size: 12px; }
-    .ref    { margin-left: auto; font-family: monospace; font-size: 11px; }
 
     .zoom-controls {
       position: absolute; bottom: 16px; right: 16px;

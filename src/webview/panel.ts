@@ -305,15 +305,33 @@ async function render(data:DiffData) {
   const total=data.summary.added_functions+data.summary.modified_functions+data.summary.removed_functions;
   if (!total) { rootEl.innerHTML=`<p class="empty">No structural changes.</p>`; return; }
 
-  const badges:string[]=[];
-  if (data.summary.added_functions)    badges.push(`<span class="badge add">+${data.summary.added_functions} added</span>`);
-  if (data.summary.modified_functions) badges.push(`<span class="badge mod">~${data.summary.modified_functions} modified</span>`);
-  if (data.summary.removed_functions)  badges.push(`<span class="badge rem">−${data.summary.removed_functions} removed</span>`);
-  badges.push(`<span class="muted">${data.summary.modules_touched.length} modules</span>`);
-  badges.push(`<span class="muted ref">${esc(data.base_ref)} → ${esc(data.head_ref)}</span>`);
+  const a=data.summary.added_functions, m=data.summary.modified_functions, r=data.summary.removed_functions;
+  const summaryHtml = `
+    <div class="summary">
+      <div class="stats">
+        <div class="stat add${a===0?" zero":""}">
+          <div class="stat-num">+${a}</div>
+          <div class="stat-label">added</div>
+        </div>
+        <div class="stat mod${m===0?" zero":""}">
+          <div class="stat-num">~${m}</div>
+          <div class="stat-label">modified</div>
+        </div>
+        <div class="stat rem${r===0?" zero":""}">
+          <div class="stat-num">−${r}</div>
+          <div class="stat-label">removed</div>
+        </div>
+        <div class="stat-sep"></div>
+        <div class="stat modules">
+          <div class="stat-num">${data.summary.modules_touched.length}</div>
+          <div class="stat-label">modules</div>
+        </div>
+      </div>
+      <div class="ref-badge">${esc(data.base_ref)}&nbsp;→&nbsp;${esc(data.head_ref)}</div>
+    </div>`;
 
   rootEl.innerHTML=`
-    <div class="summary">${badges.join("")}</div>
+    ${summaryHtml}
     <div class="zoom-controls">
       <button id="z-in">+</button><button id="z-fit">⊡</button><button id="z-out">−</button>
     </div>
