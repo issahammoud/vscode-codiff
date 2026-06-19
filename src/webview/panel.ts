@@ -113,7 +113,7 @@ function renderDiagram(data: CodiffResult) {
     diagramEl.innerHTML = svg;
 
     // Make function nodes clickable
-    diagramEl.querySelectorAll("[data-function-id]").forEach((el) => {
+    diagramEl.querySelectorAll("[data-function-id]").forEach((el: Element) => {
       (el as HTMLElement).style.cursor = "pointer";
       el.addEventListener("click", () => {
         vscode.postMessage({

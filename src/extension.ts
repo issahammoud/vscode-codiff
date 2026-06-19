@@ -1,8 +1,5 @@
 import * as vscode from "vscode";
 import { spawn } from "child_process";
-import * as path from "path";
-import * as fs from "fs";
-
 import { DiffPanel } from "./diffPanel";
 
 export function activate(context: vscode.ExtensionContext) {
@@ -74,10 +71,10 @@ function runCodiff(workspaceRoot: string, context: vscode.ExtensionContext) {
   let stdout = "";
   let stderr = "";
 
-  proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
-  proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+  proc.stdout.on("data", (chunk: { toString(): string }) => { stdout += chunk.toString(); });
+  proc.stderr.on("data", (chunk: { toString(): string }) => { stderr += chunk.toString(); });
 
-  proc.on("close", (code) => {
+  proc.on("close", (code: number | null) => {
     DiffPanel.setLoading(false);
 
     if (code !== 0 || !stdout.trim()) {
@@ -94,9 +91,9 @@ function runCodiff(workspaceRoot: string, context: vscode.ExtensionContext) {
     }
   });
 
-  proc.on("error", (err) => {
+  proc.on("error", (err: Error & { code?: string }) => {
     DiffPanel.setLoading(false);
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+    if (err.code === "ENOENT") {
       vscode.window.showErrorMessage(
         `codiff: executable not found at '${codiffPath}'. Install with: pip install codiff`
       );

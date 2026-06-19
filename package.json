@@ -12,8 +12,16 @@
   "engines": {
     "vscode": "^1.100.0"
   },
-  "categories": ["Visualization", "Other"],
-  "keywords": ["python", "call-graph", "diff", "code-review"],
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "python",
+    "call-graph",
+    "diff",
+    "code-review"
+  ],
   "activationEvents": [
     "workspaceContains:**/*.py"
   ],
@@ -76,6 +84,7 @@
     "vscode:prepublish": "node esbuild.js --production"
   },
   "devDependencies": {
+    "@types/node": "^26.0.0",
     "@types/vscode": "^1.100.0",
     "@typescript-eslint/eslint-plugin": "^8.61.1",
     "@typescript-eslint/parser": "^8.61.1",

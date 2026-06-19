@@ -9,8 +9,9 @@
     "strict": true,
     "sourceMap": true,
     "skipLibCheck": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "types": ["vscode", "node"]
   },
-  "include": ["src"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src/extension.ts", "src/diffPanel.ts"],
+  "exclude": ["node_modules", "dist", "src/webview"]
 }
