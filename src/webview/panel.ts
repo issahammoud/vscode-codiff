@@ -1,7 +1,5 @@
-import cytoscape from "cytoscape";
-// @ts-ignore – no bundled types for cytoscape-dagre
-import dagre from "cytoscape-dagre";
-cytoscape.use(dagre);
+// @ts-ignore – @dagrejs/dagre ships its own types
+import dagre from "@dagrejs/dagre";
 
 declare const acquireVsCodeApi: () => { postMessage: (msg: unknown) => void };
 const vscode = acquireVsCodeApi();
@@ -11,19 +9,13 @@ const statusEl = document.getElementById("status")!;
 const emptyEl  = document.getElementById("empty")!;
 const rootEl   = document.getElementById("root")!;
 
-let cy: cytoscape.Core | undefined;
-
 // ── Messages ───────────────────────────────────────────────────────────────────
 window.addEventListener("message", (e: MessageEvent) => {
   const msg = e.data as { type: string; data?: DiffData; status?: string };
   if (msg.type === "status") {
-    if (msg.status === "refreshing") {
-      statusEl.textContent = "↻  refreshing…";
-      statusEl.classList.add("visible");
-      emptyEl.style.display = "none";
-    } else {
-      statusEl.classList.remove("visible");
-    }
+    statusEl.textContent = msg.status === "refreshing" ? "↻  refreshing…" : "";
+    statusEl.classList.toggle("visible", msg.status === "refreshing");
+    if (msg.status === "refreshing") emptyEl.style.display = "none";
   } else if (msg.type === "update" && msg.data) {
     statusEl.classList.remove("visible");
     render(msg.data);
@@ -31,67 +23,48 @@ window.addEventListener("message", (e: MessageEvent) => {
 });
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-interface Summary { added_functions: number; modified_functions: number; removed_functions: number; modules_touched: string[]; }
-interface AddedFn   { function_id: string; file_path: string; class_name: string | null; is_entry_point: boolean; new_callers: string[]; existing_callers: string[]; new_calls: string[]; existing_calls: string[]; }
-interface ModifiedFn{ function_id: string; file_path: string; class_name: string | null; signature_changed: boolean; calls_added_new: string[]; calls_added_existing: string[]; calls_removed: string[]; callers: string[]; }
-interface RemovedFn { function_id: string; file_path: string; class_name: string | null; was_called_by: string[]; }
-interface DiffData  { schema_version: string; base_ref: string; head_ref: string; summary: Summary; added: AddedFn[]; modified: ModifiedFn[]; removed: RemovedFn[]; }
+interface AddedFn   { function_id: string; file_path: string; class_name: string|null; is_entry_point: boolean; new_callers: string[]; existing_callers: string[]; new_calls: string[]; existing_calls: string[]; }
+interface ModifiedFn{ function_id: string; file_path: string; class_name: string|null; signature_changed: boolean; calls_added_new: string[]; calls_added_existing: string[]; calls_removed: string[]; callers: string[]; }
+interface RemovedFn { function_id: string; file_path: string; class_name: string|null; was_called_by: string[]; }
+interface DiffData  { base_ref: string; head_ref: string; summary: { added_functions: number; modified_functions: number; removed_functions: number; modules_touched: string[] }; added: AddedFn[]; modified: ModifiedFn[]; removed: RemovedFn[]; }
 
-// ── Change colours ─────────────────────────────────────────────────────────────
-const C = {
-  added:    { border: "#4ade80", header: "#16a34a", text: "#14532d", bg: "#f0fdf4" },
-  modified: { border: "#fbbf24", header: "#d97706", text: "#78350f", bg: "#fefce8" },
-  removed:  { border: "#f87171", header: "#dc2626", text: "#7f1d1d", bg: "#fff1f2" },
-} as const;
-type ChangeType = keyof typeof C;
+type ChangeType = "added" | "modified" | "removed";
+const C: Record<ChangeType, { header: string; border: string; bg: string; text: string; prefix_color: string }> = {
+  added:    { header: "#16a34a", border: "#4ade80", bg: "#f0fdf4", text: "#14532d", prefix_color: "#16a34a" },
+  modified: { header: "#d97706", border: "#fbbf24", bg: "#fefce8", text: "#78350f", prefix_color: "#d97706" },
+  removed:  { header: "#dc2626", border: "#f87171", bg: "#fff1f2", text: "#7f1d1d", prefix_color: "#dc2626" },
+};
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+// ── Layout constants ───────────────────────────────────────────────────────────
+const FONT_SIZE   = 12;
+const CHAR_W      = 7;        // monospace char width at 12px
+const HEADER_H    = 54;       // file path + class name
+const ROW_H       = 24;       // per-method row
+const PAD_V       = 10;       // bottom padding
+const MIN_W       = 180;
+const H_PAD       = 24;       // horizontal text padding
+
+interface MethodRow { functionId: string; filePath: string; prefix: string; name: string; hint: string; }
+interface NodeDef   { id: string; filePath: string; className: string|null; change: ChangeType; methods: MethodRow[]; w: number; h: number; x?: number; y?: number; functionId: string; }
+interface EdgeDef   { src: string; dst: string; style: "solid"|"dashed"; points?: {x:number;y:number}[]; }
+
 const san  = (s: string) => s.replace(/[^a-zA-Z0-9]/g, "_");
 const last = (id: string) => id.split(".").at(-1) ?? id;
+const esc  = (s: string) => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 
-type Members = { added: AddedFn[]; modified: ModifiedFn[]; removed: RemovedFn[] };
-
-function dominant(m: Members): ChangeType {
-  if (!m.added.length && !m.modified.length) return "removed";
-  if (!m.modified.length && !m.removed.length) return "added";
-  return "modified";
-}
-
-function buildLabel(filePath: string, className: string | null, m: Members): string {
-  const file  = filePath.replace(/\.py$/, "").split("/").at(-1) ?? filePath;
+function nodeWidth(methods: MethodRow[], className: string|null, filePath: string): number {
+  const file  = filePath.split("/").at(-1)?.replace(/\.py$/,"") ?? "";
   const title = className ?? "«standalone»";
-  const width = Math.max(file.length, title.length, 16);
-  const sep   = "─".repeat(width);
-  const lines: string[] = [`📄 ${file}`, sep, title, sep];
-
-  const hint = (fn: AddedFn) =>
-    fn.is_entry_point ? " ⦿" :
-    fn.new_callers.length + fn.existing_callers.length > 0
-      ? ` ←${fn.new_callers.length + fn.existing_callers.length}` : "";
-
-  for (const fn of m.added)
-    lines.push(`+ ${last(fn.function_id)}()${hint(fn)}`);
-  for (const fn of m.modified) {
-    const h = fn.signature_changed ? " sig" : (fn.calls_added_new.length || fn.calls_removed.length) ? " calls" : " body";
-    lines.push(`~ ${last(fn.function_id)}()${h}`);
-  }
-  for (const fn of m.removed)
-    lines.push(`− ${last(fn.function_id)}()`);
-
-  return lines.join("\n");
+  const lines = [file, title, ...methods.map(m => `${m.prefix} ${m.name}()  ${m.hint}`)];
+  const maxLen = Math.max(...lines.map(l => l.length));
+  return Math.max(MIN_W, maxLen * CHAR_W + H_PAD * 2);
 }
 
-const LINE_H  = 17;   // px per label line
-const CHAR_W  = 7.5;  // px per monospace char
-const PAD     = 20;   // node padding (top+bottom, left+right)
-
-// ── Build Cytoscape elements ───────────────────────────────────────────────────
-function buildElements(data: DiffData): cytoscape.ElementDefinition[] {
-  const els: cytoscape.ElementDefinition[] = [];
-
-  // Group by file → class
-  const byFile = new Map<string, Map<string | null, Members>>();
-  const ensure = (fp: string, cn: string | null) => {
+// ── Build graph ────────────────────────────────────────────────────────────────
+function buildGraph(data: DiffData): { nodes: NodeDef[]; edges: EdgeDef[] } {
+  type Members = { added: AddedFn[]; modified: ModifiedFn[]; removed: RemovedFn[] };
+  const byFile = new Map<string, Map<string|null, Members>>();
+  const ensure = (fp: string, cn: string|null) => {
     if (!byFile.has(fp)) byFile.set(fp, new Map());
     const m = byFile.get(fp)!;
     if (!m.has(cn)) m.set(cn, { added: [], modified: [], removed: [] });
@@ -101,187 +74,251 @@ function buildElements(data: DiffData): cytoscape.ElementDefinition[] {
   data.modified.forEach(fn => ensure(fn.file_path, fn.class_name).modified.push(fn));
   data.removed.forEach(fn  => ensure(fn.file_path, fn.class_name).removed.push(fn));
 
-  // Build fn_id → node id lookup for edges
+  const nodes: NodeDef[] = [];
   const fidToNid = new Map<string, string>();
 
   for (const [filePath, classes] of byFile) {
     for (const [className, members] of classes) {
-      const nid = className
-        ? `cls_${san(filePath)}_${san(className)}`
-        : `mod_${san(filePath)}`;
+      const nid = className ? `cls_${san(filePath)}_${san(className)}` : `mod_${san(filePath)}`;
 
-      const label = buildLabel(filePath, className, members);
+      const change: ChangeType =
+        !members.added.length && !members.modified.length ? "removed" :
+        !members.modified.length && !members.removed.length ? "added" : "modified";
 
-      // Compute explicit width/height from label so Cytoscape renders correctly
-      const labelLines = label.split("\n");
-      const maxChars   = Math.max(...labelLines.map(l => l.length));
-      const nodeW      = Math.max(160, maxChars * CHAR_W + PAD * 2);
-      const nodeH      = labelLines.length * LINE_H + PAD * 2;
+      const methods: MethodRow[] = [
+        ...members.added.map(fn => ({
+          functionId: fn.function_id, filePath: fn.file_path,
+          prefix: "+", name: last(fn.function_id),
+          hint: fn.is_entry_point ? "entry" : (fn.new_callers.length + fn.existing_callers.length) > 0 ? `←${fn.new_callers.length + fn.existing_callers.length}` : "",
+        })),
+        ...members.modified.map(fn => ({
+          functionId: fn.function_id, filePath: fn.file_path,
+          prefix: "~", name: last(fn.function_id),
+          hint: fn.signature_changed ? "sig" : (fn.calls_added_new.length || fn.calls_removed.length) ? "calls" : "body",
+        })),
+        ...members.removed.map(fn => ({
+          functionId: fn.function_id, filePath: fn.file_path,
+          prefix: "−", name: last(fn.function_id),
+          hint: fn.was_called_by.length ? `←${fn.was_called_by.length}` : "",
+        })),
+      ];
 
-      els.push({
-        data: {
-          id:        nid,
-          label,
-          type:      "class",
-          change:    dominant(members),
-          filePath,
-          className: className ?? null,
-          w:         nodeW,
-          h:         nodeH,
-          functionId: [
-            ...members.added.map(f => f.function_id),
-            ...members.modified.map(f => f.function_id),
-            ...members.removed.map(f => f.function_id),
-          ][0] ?? "",
-        },
-      });
+      const w = nodeWidth(methods, className, filePath);
+      const h = HEADER_H + methods.length * ROW_H + PAD_V;
+
+      nodes.push({ id: nid, filePath, className, change, methods, w, h,
+        functionId: [...members.added, ...members.modified, ...members.removed][0]?.function_id ?? "" });
 
       [...members.added, ...members.modified, ...members.removed]
         .forEach(fn => fidToNid.set(fn.function_id, nid));
     }
   }
 
-  // Edges (deduplicated)
   const seen = new Set<string>();
-  const addEdge = (s: string, d: string, style: "solid" | "dashed") => {
+  const edges: EdgeDef[] = [];
+  const addEdge = (s: string, d: string, style: "solid"|"dashed") => {
     if (s === d) return;
     const key = `${s}→${d}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    els.push({ data: { source: s, target: d, style } });
+    if (seen.has(key)) return; seen.add(key);
+    edges.push({ src: s, dst: d, style });
   };
-
   data.added.forEach(fn => {
-    const src = fidToNid.get(fn.function_id);
-    if (!src) return;
-    [...fn.new_calls, ...fn.new_callers].forEach(fid => {
-      const dst = fidToNid.get(fid);
-      if (dst) addEdge(src, dst, "solid");
-    });
+    const src = fidToNid.get(fn.function_id); if (!src) return;
+    [...fn.new_calls, ...fn.new_callers].forEach(fid => { const d = fidToNid.get(fid); if (d) addEdge(src, d, "solid"); });
   });
   data.modified.forEach(fn => {
-    const src = fidToNid.get(fn.function_id);
-    if (!src) return;
-    fn.calls_added_new.forEach(fid => { const d = fidToNid.get(fid); if (d) addEdge(src, d, "solid");  });
+    const src = fidToNid.get(fn.function_id); if (!src) return;
+    fn.calls_added_new.forEach(fid => { const d = fidToNid.get(fid); if (d) addEdge(src, d, "solid"); });
     fn.calls_removed.forEach(fid  => { const d = fidToNid.get(fid); if (d) addEdge(src, d, "dashed"); });
   });
 
-  return els;
+  return { nodes, edges };
 }
 
-// ── Cytoscape styles ───────────────────────────────────────────────────────────
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildStyle(): any[] {
-  // Class node: explicit w/h computed from label, so text is always inside
-  const classBase = {
-    "shape":       "round-rectangle",
-    "label":       "data(label)",
-    "width":       "data(w)",
-    "height":      "data(h)",
-    "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
-    "font-size":   "12px",
-    "text-valign": "center",
-    "text-halign": "center",
-    "text-wrap":   "wrap",
-    "text-max-width": "320px",
-    "border-width": 2,
-    "padding":      "10px 14px",
-  };
+// ── Dagre layout ───────────────────────────────────────────────────────────────
+function runLayout(nodes: NodeDef[], edges: EdgeDef[]) {
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({ rankdir: "LR", ranksep: 120, nodesep: 50, marginx: 40, marginy: 40, edgesep: 20 });
+  g.setDefaultEdgeLabel(() => ({}));
+  nodes.forEach(n => g.setNode(n.id, { width: n.w, height: n.h }));
+  edges.forEach(e => g.setEdge(e.src, e.dst));
+  dagre.layout(g);
+  nodes.forEach(n => {
+    const p = g.node(n.id);
+    n.x = p.x - n.w / 2;
+    n.y = p.y - n.h / 2;
+  });
+  edges.forEach(e => {
+    const ed = g.edge(e.src, e.dst);
+    e.points = ed?.points ?? [];
+  });
+}
 
-  return [
-    { selector: "node[type='class']",
-      style: { ...classBase, "background-color": "#ffffff", "border-color": "#e2e8f0", "color": "#1e293b" } },
-    { selector: "node[type='class'][change='added']",
-      style: { "background-color": C.added.bg,    "border-color": C.added.border,    "color": C.added.text    } },
-    { selector: "node[type='class'][change='modified']",
-      style: { "background-color": C.modified.bg, "border-color": C.modified.border, "color": C.modified.text } },
-    { selector: "node[type='class'][change='removed']",
-      style: { "background-color": C.removed.bg,  "border-color": C.removed.border,  "color": C.removed.text  } },
+// ── SVG rendering ─────────────────────────────────────────────────────────────
+function renderSVG(nodes: NodeDef[], edges: EdgeDef[]): string {
+  const maxX = Math.max(...nodes.map(n => n.x! + n.w)) + 60;
+  const maxY = Math.max(...nodes.map(n => n.y! + n.h)) + 60;
 
-    { selector: "edge[style='solid']", style: {
-        "width": 2, "line-color": "#475569",
-        "target-arrow-color": "#475569", "target-arrow-shape": "triangle",
-        "curve-style": "bezier", "arrow-scale": 1.2,
-      } },
-    { selector: "edge[style='dashed']", style: {
-        "width": 2, "line-color": "#f87171", "line-style": "dashed",
-        "target-arrow-color": "#f87171", "target-arrow-shape": "triangle",
-        "curve-style": "bezier", "arrow-scale": 1.2,
-      } },
-  ];
+  const parts: string[] = [];
+  parts.push(`<svg id="uml-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${maxX} ${maxY}" style="width:100%;height:100%;display:block">`);
+
+  // Arrow markers
+  parts.push(`<defs>
+    <marker id="arr-solid" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+    </marker>
+    <marker id="arr-dashed" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#f87171"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="rgba(0,0,0,0.15)"/>
+    </filter>
+  </defs>`);
+
+  // Namespace background groups (one rect per unique file)
+  const fileGroups = new Map<string, NodeDef[]>();
+  nodes.forEach(n => { if (!fileGroups.has(n.filePath)) fileGroups.set(n.filePath, []); fileGroups.get(n.filePath)!.push(n); });
+  for (const [fp, grpNodes] of fileGroups) {
+    const gx = Math.min(...grpNodes.map(n => n.x!)) - 16;
+    const gy = Math.min(...grpNodes.map(n => n.y!)) - 32;
+    const gw = Math.max(...grpNodes.map(n => n.x! + n.w)) - gx + 16;
+    const gh = Math.max(...grpNodes.map(n => n.y! + n.h)) - gy + 16;
+    const file = fp.replace(/\.py$/,"");
+    parts.push(`<rect x="${gx}" y="${gy}" width="${gw}" height="${gh}" rx="12" fill="#0f172a" opacity="0.06"/>`);
+    parts.push(`<text x="${gx+12}" y="${gy+14}" font-size="10" font-family="monospace" fill="#64748b">📄 ${esc(file)}.py</text>`);
+  }
+
+  // Edges
+  edges.forEach(e => {
+    if (!e.points?.length) return;
+    const solid = e.style === "solid";
+    const color = solid ? "#475569" : "#f87171";
+    const pts = e.points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+    parts.push(`<path d="${pts}" fill="none" stroke="${color}" stroke-width="1.5"
+      ${solid ? "" : `stroke-dasharray="6,3"`}
+      marker-end="url(#arr-${solid ? "solid" : "dashed"})"/>`);
+  });
+
+  // Class nodes
+  nodes.forEach(n => {
+    const { x, y, w, h, change, filePath, className, methods } = n;
+    const col = C[change];
+    const cx = x!;
+    const cy = y!;
+    const title = className ?? "«standalone»";
+
+    parts.push(`<g class="uml-node" data-nid="${esc(n.id)}">`);
+
+    // Drop shadow + outer box
+    parts.push(`<rect x="${cx}" y="${cy}" width="${w}" height="${h}" rx="8" fill="${col.bg}" stroke="${col.border}" stroke-width="2" filter="url(#shadow)"/>`);
+
+    // Coloured header
+    parts.push(`<clipPath id="clip_${san(n.id)}"><rect x="${cx}" y="${cy}" width="${w}" height="${HEADER_H}" rx="8"/></clipPath>`);
+    parts.push(`<rect x="${cx}" y="${cy}" width="${w}" height="${HEADER_H}" fill="${col.header}" clip-path="url(#clip_${san(n.id)})"/>`);
+
+    // Class name (white, bold, centered)
+    parts.push(`<text x="${cx + w/2}" y="${cy + 34}" text-anchor="middle" font-size="13" font-weight="bold" font-family="ui-monospace,monospace" fill="white">${esc(title)}</text>`);
+
+    // Separator
+    parts.push(`<line x1="${cx}" y1="${cy+HEADER_H}" x2="${cx+w}" y2="${cy+HEADER_H}" stroke="${col.border}" stroke-width="1"/>`);
+
+    // Method rows — each is individually clickable
+    methods.forEach((m, i) => {
+      const ry  = cy + HEADER_H + i * ROW_H;
+      const pcol = m.prefix === "+" ? "#16a34a" : m.prefix === "~" ? "#d97706" : "#dc2626";
+      const fcol = m.prefix === "−" ? "#9ca3af" : col.text;
+      // Hover background
+      parts.push(`<rect class="method-bg" x="${cx+2}" y="${ry+2}" width="${w-4}" height="${ROW_H-2}" rx="4" fill="transparent"/>`);
+      parts.push(`<text x="${cx+H_PAD}" y="${ry + ROW_H - 7}" font-size="${FONT_SIZE}" font-family="ui-monospace,monospace"
+        class="method-text" data-fid="${esc(m.functionId)}" data-fp="${esc(m.filePath)}" style="cursor:pointer">
+        <tspan fill="${pcol}" font-weight="bold">${m.prefix}</tspan>
+        <tspan fill="${fcol}" ${m.prefix === "−" ? "text-decoration='line-through'" : ""}> ${esc(m.name)}()</tspan>
+        ${m.hint ? `<tspan fill="#94a3b8" font-size="10"> ${esc(m.hint)}</tspan>` : ""}
+      </text>`);
+    });
+
+    parts.push(`</g>`);
+  });
+
+  parts.push(`</svg>`);
+  return parts.join("\n");
+}
+
+// ── Pan / zoom ─────────────────────────────────────────────────────────────────
+function initPanZoom(svgEl: SVGSVGElement) {
+  let scale = 1, tx = 0, ty = 0;
+  let drag = false, ox = 0, oy = 0;
+
+  const apply = () => svgEl.setAttribute("viewBox",
+    `${-tx/scale} ${-ty/scale} ${svgEl.clientWidth/scale} ${svgEl.clientHeight/scale}`);
+
+  svgEl.addEventListener("wheel", e => {
+    e.preventDefault();
+    const r = svgEl.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    const f  = e.deltaY < 0 ? 1.15 : 1/1.15;
+    tx = mx - f * (mx - tx);
+    ty = my - f * (my - ty);
+    scale *= f;
+    apply();
+  }, { passive: false });
+
+  svgEl.addEventListener("mousedown", e => { drag = true; ox = e.clientX - tx; oy = e.clientY - ty; svgEl.style.cursor = "grabbing"; });
+  window.addEventListener("mousemove", e => { if (!drag) return; tx = e.clientX - ox; ty = e.clientY - oy; apply(); });
+  window.addEventListener("mouseup",   () => { drag = false; svgEl.style.cursor = "default"; });
 }
 
 // ── Main render ────────────────────────────────────────────────────────────────
 function render(data: DiffData) {
   emptyEl.style.display = "none";
-  rootEl.innerHTML = "";
+  rootEl.innerHTML      = "";
 
   const total = data.summary.added_functions + data.summary.modified_functions + data.summary.removed_functions;
   if (total === 0) {
-    rootEl.innerHTML = `<p class="empty">No structural changes between <code>${esc(data.base_ref)}</code> and <code>${esc(data.head_ref)}</code>.</p>`;
+    rootEl.innerHTML = `<p class="empty">No structural changes.</p>`;
     return;
   }
 
-  // ── Summary bar ──────────────────────────────────────────────────────────────
-  const parts: string[] = [`<div class="summary">`];
-  if (data.summary.added_functions)    parts.push(`<span class="badge add">+${data.summary.added_functions} added</span>`);
-  if (data.summary.modified_functions) parts.push(`<span class="badge mod">~${data.summary.modified_functions} modified</span>`);
-  if (data.summary.removed_functions)  parts.push(`<span class="badge rem">−${data.summary.removed_functions} removed</span>`);
-  parts.push(`<span class="muted">${data.summary.modules_touched.length} modules</span>`);
-  parts.push(`<span class="muted ref">${esc(data.base_ref)} → ${esc(data.head_ref)}</span>`);
-  parts.push(`</div>`);
+  // Summary bar
+  const badgeParts: string[] = [];
+  if (data.summary.added_functions)    badgeParts.push(`<span class="badge add">+${data.summary.added_functions} added</span>`);
+  if (data.summary.modified_functions) badgeParts.push(`<span class="badge mod">~${data.summary.modified_functions} modified</span>`);
+  if (data.summary.removed_functions)  badgeParts.push(`<span class="badge rem">−${data.summary.removed_functions} removed</span>`);
+  badgeParts.push(`<span class="muted">${data.summary.modules_touched.length} modules</span>`);
+  badgeParts.push(`<span class="muted ref">${esc(data.base_ref)} → ${esc(data.head_ref)}</span>`);
 
-  // ── Zoom controls ─────────────────────────────────────────────────────────────
-  parts.push(`
-    <div class="zoom-controls">
-      <button id="zoom-in"  title="Zoom in">+</button>
-      <button id="zoom-fit" title="Fit to screen">⊡</button>
-      <button id="zoom-out" title="Zoom out">−</button>
-    </div>
-  `);
+  const summaryHtml  = `<div class="summary">${badgeParts.join("")}</div>`;
+  const zoomHtml     = `<div class="zoom-controls"><button id="z-in">+</button><button id="z-fit">⊡</button><button id="z-out">−</button></div>`;
+  const diagramHtml  = `<div id="diagram-wrap" style="flex:1;position:relative;overflow:hidden"></div>`;
+  rootEl.innerHTML   = summaryHtml + zoomHtml + diagramHtml;
 
-  // ── Cytoscape container ───────────────────────────────────────────────────────
-  parts.push(`<div id="cy"></div>`);
-  rootEl.innerHTML = parts.join("");
+  const { nodes, edges } = buildGraph(data);
+  runLayout(nodes, edges);
 
-  const cyEl = document.getElementById("cy")!;
+  const wrap = document.getElementById("diagram-wrap")!;
+  wrap.innerHTML = renderSVG(nodes, edges);
 
-  cy = cytoscape({
-    container: cyEl,
-    elements:  buildElements(data),
-    style:     buildStyle(),
-    // @ts-ignore – dagre options extend BaseLayoutOptions
-    layout: {
-      name:    "dagre",
-      rankDir: "LR",
-      rankSep: 120,
-      nodeSep: 40,
-      edgeSep: 20,
-      padding: 40,
-      ranker:  "tight-tree",
-    } as cytoscape.LayoutOptions,
-    minZoom: 0.05,
-    maxZoom: 4,
-    wheelSensitivity: 0.2,
-    boxSelectionEnabled: false,
-    userPanningEnabled:  true,
-    userZoomingEnabled:  true,
+  const svgEl = wrap.querySelector<SVGSVGElement>("#uml-svg")!;
+  initPanZoom(svgEl);
+
+  // Zoom control buttons
+  const fit = () => { svgEl.setAttribute("viewBox", `0 0 ${svgEl.viewBox.baseVal.width} ${svgEl.viewBox.baseVal.height}`); };
+  document.getElementById("z-in")! .addEventListener("click", () => { const vb = svgEl.viewBox.baseVal; const cx = vb.x + vb.width/2; const cy = vb.y + vb.height/2; svgEl.setAttribute("viewBox", `${cx - vb.width/2.6} ${cy - vb.height/2.6} ${vb.width/1.3} ${vb.height/1.3}`); });
+  document.getElementById("z-out")!.addEventListener("click", () => { const vb = svgEl.viewBox.baseVal; const cx = vb.x + vb.width/2; const cy = vb.y + vb.height/2; svgEl.setAttribute("viewBox", `${cx - vb.width*0.65} ${cy - vb.height*0.65} ${vb.width*1.3} ${vb.height*1.3}`); });
+  document.getElementById("z-fit")!.addEventListener("click", fit);
+
+  // Per-method click → navigate
+  svgEl.querySelectorAll<SVGTextElement>(".method-text").forEach(el => {
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      vscode.postMessage({ type: "navigate", functionId: el.dataset.fid, filePath: el.dataset.fp });
+    });
   });
 
-  // Click → navigate to file
-  cy.on("tap", "node[type='class']", (evt) => {
-    const d = evt.target.data();
-    if (d.functionId && d.filePath) {
-      vscode.postMessage({ type: "navigate", functionId: d.functionId, filePath: d.filePath });
-    }
+  // Hover highlight on method rows
+  svgEl.querySelectorAll<SVGTextElement>(".method-text").forEach(el => {
+    const bg = el.previousElementSibling as SVGRectElement | null;
+    el.addEventListener("mouseenter", () => { bg?.setAttribute("fill", "rgba(0,0,0,0.06)"); });
+    el.addEventListener("mouseleave", () => { bg?.setAttribute("fill", "transparent"); });
   });
-
-  // Zoom controls
-  document.getElementById("zoom-in")! .addEventListener("click", () => cy!.zoom({ level: cy!.zoom() * 1.3, renderedPosition: { x: cyEl.clientWidth / 2, y: cyEl.clientHeight / 2 } }));
-  document.getElementById("zoom-out")!.addEventListener("click", () => cy!.zoom({ level: cy!.zoom() / 1.3, renderedPosition: { x: cyEl.clientWidth / 2, y: cyEl.clientHeight / 2 } }));
-  document.getElementById("zoom-fit")!.addEventListener("click", () => cy!.fit(undefined, 30));
-}
-
-function esc(s: string) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
