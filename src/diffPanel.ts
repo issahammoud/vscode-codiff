@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "path";
+import { navigateToFunction } from "./extension";
 
 /**
  * Manages the single webview panel that renders the codiff output.
@@ -55,24 +56,16 @@ export class DiffPanel {
   }
 
   public static update(data: unknown) {
-    DiffPanel.currentPanel?._panel.webview.postMessage({
-      type: "update",
-      data,
-    });
+    DiffPanel.currentPanel?._panel.webview.postMessage({ type: "update", data });
   }
 
-  public static setLoading(loading: boolean) {
-    DiffPanel.currentPanel?._panel.webview.postMessage({
-      type: "loading",
-      loading,
-    });
+  public static setStatus(status: "refreshing" | "idle") {
+    DiffPanel.currentPanel?._panel.webview.postMessage({ type: "status", status });
   }
 
-  private _handleMessage(msg: { type: string; functionId?: string }) {
-    if (msg.type === "navigate" && msg.functionId) {
-      // functionId format: "package.module.ClassName.method"
-      // Convert to file path hint and open in editor
-      navigateToFunction(msg.functionId);
+  private _handleMessage(msg: { type: string; functionId?: string; filePath?: string }) {
+    if (msg.type === "navigate" && msg.functionId && msg.filePath) {
+      navigateToFunction(msg.functionId, msg.filePath);
     }
   }
 
@@ -108,13 +101,27 @@ export class DiffPanel {
     }
 
     /* ── Loading / empty ─────────────────────────────────── */
-    #loading, .empty {
+    .empty {
       text-align: center;
       padding: 60px 0;
       color: var(--vscode-descriptionForeground);
       font-size: 13px;
     }
-    #loading { display: none; }
+    #status {
+      position: fixed;
+      top: 10px; right: 14px;
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      display: none;
+      align-items: center;
+      gap: 5px;
+      background: var(--vscode-editor-background);
+      padding: 3px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--vscode-panel-border);
+      z-index: 10;
+    }
+    #status.visible { display: flex; }
 
     /* ── Summary bar ─────────────────────────────────────── */
     .summary {
@@ -277,7 +284,7 @@ export class DiffPanel {
   </style>
 </head>
 <body>
-  <div id="loading">Running codiff…</div>
+  <div id="status"></div>
   <div id="empty">Run <strong>codiff: Show Structural Diff</strong> to see the call-graph diff.</div>
   <div id="root"></div>
   <script nonce="${nonce}" src="${scriptUri}"></script>
@@ -306,24 +313,3 @@ function getNonce(): string {
   return text;
 }
 
-async function navigateToFunction(functionId: string) {
-  // Best-effort: convert "pkg.module.Class.method" → search in workspace
-  const parts = functionId.split(".");
-  const name = parts[parts.length - 1];
-  const files = await vscode.workspace.findFiles("**/*.py", "**/node_modules/**");
-
-  for (const file of files) {
-    const doc = await vscode.workspace.openTextDocument(file);
-    const text = doc.getText();
-    const idx = text.indexOf(`def ${name}`);
-    if (idx !== -1) {
-      const pos = doc.positionAt(idx);
-      await vscode.window.showTextDocument(doc, {
-        selection: new vscode.Range(pos, pos),
-        preview: false,
-      });
-      return;
-    }
-  }
-  vscode.window.showWarningMessage(`codiff: could not find definition of ${name}`);
-}

@@ -4,9 +4,9 @@ declare const acquireVsCodeApi: () => {
 const vscode = acquireVsCodeApi();
 
 // ── DOM ────────────────────────────────────────────────────────────────────────
-const loadingEl = document.getElementById("loading")!;
-const emptyEl   = document.getElementById("empty")!;
-const rootEl    = document.getElementById("root")!;
+const statusEl = document.getElementById("status")!;
+const emptyEl  = document.getElementById("empty")!;
+const rootEl   = document.getElementById("root")!;
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface Summary {
@@ -34,25 +34,35 @@ interface DiffData {
 
 // ── Messages ───────────────────────────────────────────────────────────────────
 window.addEventListener("message", (e: MessageEvent) => {
-  const msg = e.data as { type: string; data?: DiffData; loading?: boolean };
-  if (msg.type === "loading") {
-    loadingEl.style.display = msg.loading ? "block" : "none";
-    if (msg.loading) emptyEl.style.display = "none";
+  const msg = e.data as { type: string; data?: DiffData; status?: string };
+  if (msg.type === "status") {
+    if (msg.status === "refreshing") {
+      statusEl.textContent = "↻ refreshing…";
+      statusEl.classList.add("visible");
+      emptyEl.style.display = "none";
+    } else {
+      statusEl.classList.remove("visible");
+    }
   } else if (msg.type === "update" && msg.data) {
+    statusEl.classList.remove("visible");
     render(msg.data);
   }
 });
 
 // ── Main renderer ──────────────────────────────────────────────────────────────
 function render(data: DiffData) {
-  loadingEl.style.display = "none";
+  statusEl.classList.remove("visible");
   emptyEl.style.display   = "none";
   rootEl.innerHTML = buildHtml(data);
 
-  // click → navigate
+  // click → navigate (pass both functionId and filePath for direct file open)
   rootEl.querySelectorAll<HTMLElement>("[data-fid]").forEach(el => {
     el.addEventListener("click", () =>
-      vscode.postMessage({ type: "navigate", functionId: el.dataset.fid })
+      vscode.postMessage({
+        type: "navigate",
+        functionId: el.dataset.fid,
+        filePath:   el.dataset.fp,
+      })
     );
   });
 }
@@ -170,7 +180,7 @@ function buildHtml(data: DiffData): string {
                    : (fn.new_callers.length + fn.existing_callers.length) > 0
                      ? `← ${fn.new_callers.length + fn.existing_callers.length} caller${fn.new_callers.length + fn.existing_callers.length !== 1 ? "s" : ""}`
                      : "";
-        parts.push(`    <div class="method add" data-fid="${esc(fn.function_id)}">`);
+        parts.push(`    <div class="method add" data-fid="${esc(fn.function_id)}" data-fp="${esc(fn.file_path)}">`);
         parts.push(`      <span class="vis">+</span>`);
         parts.push(`      <span class="fn-name">${esc(name)}()</span>`);
         if (hint) parts.push(`      <span class="hint">${esc(hint)}</span>`);
@@ -182,7 +192,7 @@ function buildHtml(data: DiffData): string {
         const hint = fn.signature_changed ? "sig changed"
                    : (fn.calls_added_new.length || fn.calls_removed.length) ? "calls changed"
                    : "body changed";
-        parts.push(`    <div class="method mod" data-fid="${esc(fn.function_id)}">`);
+        parts.push(`    <div class="method mod" data-fid="${esc(fn.function_id)}" data-fp="${esc(fn.file_path)}">`);
         parts.push(`      <span class="vis">~</span>`);
         parts.push(`      <span class="fn-name">${esc(name)}()</span>`);
         parts.push(`      <span class="hint">${esc(hint)}</span>`);
@@ -192,7 +202,7 @@ function buildHtml(data: DiffData): string {
       for (const fn of members.removed) {
         const name = fn.function_id.split(".").at(-1)!;
         const hint = fn.was_called_by.length > 0 ? `← ${fn.was_called_by.length} caller${fn.was_called_by.length !== 1 ? "s" : ""} affected` : "";
-        parts.push(`    <div class="method rem" data-fid="${esc(fn.function_id)}">`);
+        parts.push(`    <div class="method rem" data-fid="${esc(fn.function_id)}" data-fp="${esc(fn.file_path)}">`);
         parts.push(`      <span class="vis">−</span>`);
         parts.push(`      <span class="fn-name struck">${esc(name)}()</span>`);
         if (hint) parts.push(`      <span class="hint">${esc(hint)}</span>`);
