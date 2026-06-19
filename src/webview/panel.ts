@@ -308,13 +308,11 @@ async function render(data:DiffData) {
   const a=data.summary.added_functions, m=data.summary.modified_functions, r=data.summary.removed_functions;
   const summaryHtml = `
     <div class="summary">
-      <span class="s-add">+${a} added</span>
-      <span class="s-sep">·</span>
-      <span class="s-mod">~${m} modified</span>
-      <span class="s-sep">·</span>
-      <span class="s-rem">−${r} removed</span>
-      <span class="s-sep">·</span>
-      <span class="s-dim">${data.summary.modules_touched.length} modules</span>
+      <span class="s-stat s-add"><span class="s-num">+${a}</span><span class="s-lbl">added</span></span>
+      <span class="s-stat s-mod"><span class="s-num">~${m}</span><span class="s-lbl">modified</span></span>
+      <span class="s-stat s-rem"><span class="s-num">−${r}</span><span class="s-lbl">removed</span></span>
+      <span class="s-pipe"></span>
+      <span class="s-modules">${data.summary.modules_touched.length} modules</span>
       <span class="s-ref">${esc(data.base_ref)} → ${esc(data.head_ref)}</span>
     </div>`;
 

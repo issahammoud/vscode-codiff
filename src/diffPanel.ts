@@ -129,15 +129,34 @@ export class DiffPanel {
       gap: 6px;
       padding: 8px 16px;
       border-bottom: 1px solid var(--vscode-panel-border);
-      font-size: 13px;
+      font-size: 12px;
       flex-shrink: 0;
     }
-    .s-add { color: #16a34a; font-weight: 600; }
-    .s-mod { color: #ca8a04; font-weight: 600; }
-    .s-rem { color: #dc2626; font-weight: 600; }
-    .s-sep { color: var(--vscode-descriptionForeground); padding: 0 2px; }
-    .s-dim { color: var(--vscode-descriptionForeground); }
-    .s-ref { margin-left: auto; font-size: 11px; font-family: ui-monospace, monospace; color: var(--vscode-descriptionForeground); }
+    .s-stat {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 4px;
+      padding: 3px 9px;
+      border-radius: 5px;
+    }
+    .s-num { font-weight: 700; font-size: 13px; }
+    .s-lbl { font-size: 11px; opacity: 0.85; }
+    .s-add { background: rgba(22,163,74,0.1);  color: #16a34a; }
+    .s-mod { background: rgba(202,138,4,0.1);  color: #b45309; }
+    .s-rem { background: rgba(220,38,38,0.1);  color: #dc2626; }
+    .s-pipe {
+      width: 1px; height: 14px;
+      background: var(--vscode-panel-border);
+      margin: 0 4px; flex-shrink: 0;
+    }
+    .s-modules { color: var(--vscode-descriptionForeground); font-size: 12px; }
+    .s-ref {
+      margin-left: auto;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      opacity: 0.8;
+    }
     .muted { color: var(--vscode-descriptionForeground); font-size: 12px; }
 
     .zoom-controls {
