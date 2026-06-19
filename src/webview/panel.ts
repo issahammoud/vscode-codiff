@@ -308,26 +308,14 @@ async function render(data:DiffData) {
   const a=data.summary.added_functions, m=data.summary.modified_functions, r=data.summary.removed_functions;
   const summaryHtml = `
     <div class="summary">
-      <div class="stats">
-        <div class="stat add${a===0?" zero":""}">
-          <div class="stat-num">+${a}</div>
-          <div class="stat-label">added</div>
-        </div>
-        <div class="stat mod${m===0?" zero":""}">
-          <div class="stat-num">~${m}</div>
-          <div class="stat-label">modified</div>
-        </div>
-        <div class="stat rem${r===0?" zero":""}">
-          <div class="stat-num">−${r}</div>
-          <div class="stat-label">removed</div>
-        </div>
-        <div class="stat-sep"></div>
-        <div class="stat modules">
-          <div class="stat-num">${data.summary.modules_touched.length}</div>
-          <div class="stat-label">modules</div>
-        </div>
-      </div>
-      <div class="ref-badge">${esc(data.base_ref)}&nbsp;→&nbsp;${esc(data.head_ref)}</div>
+      <span class="s-add">+${a} added</span>
+      <span class="s-sep">·</span>
+      <span class="s-mod">~${m} modified</span>
+      <span class="s-sep">·</span>
+      <span class="s-rem">−${r} removed</span>
+      <span class="s-sep">·</span>
+      <span class="s-dim">${data.summary.modules_touched.length} modules</span>
+      <span class="s-ref">${esc(data.base_ref)} → ${esc(data.head_ref)}</span>
     </div>`;
 
   rootEl.innerHTML=`

@@ -126,72 +126,19 @@ export class DiffPanel {
     .summary {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 10px 16px;
+      gap: 6px;
+      padding: 8px 16px;
       border-bottom: 1px solid var(--vscode-panel-border);
+      font-size: 13px;
       flex-shrink: 0;
     }
-    .stats {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .stat {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 6px 18px;
-      border-radius: 8px;
-      min-width: 72px;
-    }
-    .stat-num {
-      font-size: 22px;
-      font-weight: 700;
-      line-height: 1;
-      font-family: ui-monospace, SFMono-Regular, monospace;
-      letter-spacing: -0.5px;
-    }
-    .stat-label {
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.07em;
-      margin-top: 3px;
-      opacity: 0.75;
-    }
-    .stat.add { background: #dcfce7; }
-    .stat.add .stat-num   { color: #15803d; }
-    .stat.add .stat-label { color: #16a34a; }
-    .stat.mod { background: #fef9c3; }
-    .stat.mod .stat-num   { color: #a16207; }
-    .stat.mod .stat-label { color: #ca8a04; }
-    .stat.rem { background: #fee2e2; }
-    .stat.rem .stat-num   { color: #b91c1c; }
-    .stat.rem .stat-label { color: #dc2626; }
-    .stat.zero { opacity: 0.4; }
-    .stat-sep {
-      width: 1px; height: 36px;
-      background: var(--vscode-panel-border);
-      margin: 0 4px;
-    }
-    .stat.modules {
-      background: var(--vscode-input-background, #f1f5f9);
-      border: 1px solid var(--vscode-panel-border);
-    }
-    .stat.modules .stat-num   { color: var(--vscode-foreground); font-size: 18px; }
-    .stat.modules .stat-label { color: var(--vscode-descriptionForeground); }
-    .ref-badge {
-      font-size: 11px;
-      font-family: ui-monospace, SFMono-Regular, monospace;
-      color: var(--vscode-descriptionForeground);
-      background: var(--vscode-input-background, #f1f5f9);
-      border: 1px solid var(--vscode-panel-border);
-      padding: 4px 10px;
-      border-radius: 5px;
-      white-space: nowrap;
-    }
-    .muted  { color: var(--vscode-descriptionForeground); font-size: 12px; }
+    .s-add { color: #16a34a; font-weight: 600; }
+    .s-mod { color: #ca8a04; font-weight: 600; }
+    .s-rem { color: #dc2626; font-weight: 600; }
+    .s-sep { color: var(--vscode-descriptionForeground); padding: 0 2px; }
+    .s-dim { color: var(--vscode-descriptionForeground); }
+    .s-ref { margin-left: auto; font-size: 11px; font-family: ui-monospace, monospace; color: var(--vscode-descriptionForeground); }
+    .muted { color: var(--vscode-descriptionForeground); font-size: 12px; }
 
     .zoom-controls {
       position: absolute; bottom: 16px; right: 16px;
