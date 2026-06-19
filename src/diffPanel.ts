@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "path";
-import { navigateToFunction } from "./extension";
+import { navigateToFunction } from "./navigation";
 
 /**
  * Manages the single webview panel that renders the codiff output.

@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import * as path from "path";
 import { spawn, ChildProcess } from "child_process";
 import { DiffPanel } from "./diffPanel";
 
@@ -109,38 +108,3 @@ function getWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
-// ── Navigation (called from DiffPanel) ───────────────────────────────────────
-
-export async function navigateToFunction(
-  functionId: string,
-  filePath: string
-): Promise<void> {
-  const root = getWorkspaceRoot();
-  if (!root) return;
-
-  // filePath is relative to repo root (e.g. "unstructured/chunking/base.py")
-  const absPath = path.join(root, filePath);
-  const uri     = vscode.Uri.file(absPath);
-  const fnName  = functionId.split(".").at(-1) ?? functionId;
-
-  try {
-    const doc  = await vscode.workspace.openTextDocument(uri);
-    const text = doc.getText();
-
-    // Find the definition line — try "def fnName" first, then "class fnName"
-    const patterns = [`def ${fnName}`, `class ${fnName}`];
-    let pos = new vscode.Position(0, 0);
-    for (const pat of patterns) {
-      const idx = text.indexOf(pat);
-      if (idx !== -1) { pos = doc.positionAt(idx); break; }
-    }
-
-    await vscode.window.showTextDocument(doc, {
-      viewColumn: vscode.ViewColumn.One,
-      selection:  new vscode.Range(pos, pos),
-      preview:    false,
-    });
-  } catch {
-    vscode.window.showWarningMessage(`codiff: could not open ${filePath}`);
-  }
-}
