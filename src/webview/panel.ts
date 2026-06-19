@@ -181,7 +181,7 @@ function buildStyle(): any[] {
     "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
     "font-size":   "12px",
     "text-valign": "center",
-    "text-halign": "left",
+    "text-halign": "center",
     "text-wrap":   "wrap",
     "text-max-width": "320px",
     "border-width": 2,
