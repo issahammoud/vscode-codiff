@@ -168,74 +168,62 @@ function buildElements(data: DiffData): cytoscape.ElementDefinition[] {
 // ── Cytoscape styles ───────────────────────────────────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildStyle(): any[] {
-  // Namespace style
-  const nsStyle: cytoscape.Css.Node = {
-    "background-color":    "#0f172a",
-    "background-opacity":  0.9,
-    "border-width":        0,
-    "label":               "data(label)",
-    "color":               "#94a3b8",
-    "font-family":         "ui-monospace, SFMono-Regular, Menlo, monospace",
-    "font-size":           "11px",
-    "text-valign":         "bottom",
-    "text-halign":         "center",
-    "text-margin-y":       6,
-    "shape":               "round-rectangle",
-    "padding":             "16px",
+  // Namespace compound node — auto-sizes to fit children
+  const nsStyle = {
+    "shape":              "round-rectangle",
+    "background-color":   "#0f172a",
+    "background-opacity": 1,
+    "border-width":       0,
+    "label":              "data(label)",
+    "color":              "#64748b",
+    "font-family":        "ui-monospace, SFMono-Regular, Menlo, monospace",
+    "font-size":          "10px",
+    "text-valign":        "bottom",
+    "text-halign":        "center",
+    "text-margin-y":      4,
+    "padding":            "18px 14px 24px 14px",   // extra bottom padding for the label
   };
 
-  // Base class style (overridden per change type below)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const classBase: any = {
-    "shape":               "round-rectangle",
-    "label":               "data(label)",
-    "font-family":         "ui-monospace, SFMono-Regular, Menlo, monospace",
-    "font-size":           "12px",
-    "text-valign":         "center",
-    "text-halign":         "left",
-    "text-wrap":           "pre",
-    "text-max-width":      "280px",
-    "padding":             "10px 14px",
-    "border-width":        2,
-    "width":               "label",
-    "height":              "label",
-    "text-background-opacity": 0,
-    "transition-property":     "border-width, border-color",
-    "transition-duration":     "0.1s",
-  };
-
-  // Hover
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const classHover: any = {
-    "border-width": 3,
-    "cursor": "pointer",
-  };
-
-  // Edge style
-  const edgeSolid: cytoscape.Css.Edge = {
-    "width":             2,
-    "line-color":        "#64748b",
-    "target-arrow-color":"#64748b",
-    "target-arrow-shape":"triangle",
-    "curve-style":       "bezier",
-    "arrow-scale":       1.2,
-  };
-  const edgeDashed: cytoscape.Css.Edge = {
-    ...edgeSolid,
-    "line-style":        "dashed",
-    "line-color":        "#f87171",
-    "target-arrow-color":"#f87171",
+  // Class node — "width: label" + "height: label" with text-wrap: wrap
+  const classBase = {
+    "shape":          "round-rectangle",
+    "label":          "data(label)",
+    "font-family":    "ui-monospace, SFMono-Regular, Menlo, monospace",
+    "font-size":      "12px",
+    "text-valign":    "center",
+    "text-halign":    "left",
+    "text-wrap":      "wrap",      // REQUIRED for \n in label and width/height: label
+    "text-max-width": "260px",
+    "width":          "label",
+    "height":         "label",
+    "padding":        "10px 14px",
+    "border-width":   2,
   };
 
   return [
-    { selector: "[type='namespace']",             style: nsStyle   },
-    { selector: "[type='class']",                 style: { ...classBase, "background-color": "#ffffff", "border-color": "#e2e8f0", "color": "#1e293b" } },
-    { selector: "[type='class'][change='added']",   style: { "background-color": C.added.bg,    "border-color": C.added.border,    "color": C.added.text    } },
-    { selector: "[type='class'][change='modified']",style: { "background-color": C.modified.bg, "border-color": C.modified.border, "color": C.modified.text } },
-    { selector: "[type='class'][change='removed']", style: { "background-color": C.removed.bg,  "border-color": C.removed.border,  "color": C.removed.text  } },
-    { selector: "[type='class']:hover",             style: classHover },
-    { selector: "[style='solid']",                  style: edgeSolid  },
-    { selector: "[style='dashed']",                 style: edgeDashed },
+    { selector: "[type='namespace']", style: nsStyle },
+
+    { selector: "[type='class']",
+      style: { ...classBase, "background-color": "#ffffff", "border-color": "#e2e8f0", "color": "#1e293b" } },
+    { selector: "[type='class'][change='added']",
+      style: { "background-color": C.added.bg,    "border-color": C.added.border,    "color": C.added.text    } },
+    { selector: "[type='class'][change='modified']",
+      style: { "background-color": C.modified.bg, "border-color": C.modified.border, "color": C.modified.text } },
+    { selector: "[type='class'][change='removed']",
+      style: { "background-color": C.removed.bg,  "border-color": C.removed.border,  "color": C.removed.text  } },
+    { selector: "[type='class']:active",
+      style: { "border-width": 3, "overlay-opacity": 0 } },
+
+    { selector: "edge[style='solid']", style: {
+        "width": 2, "line-color": "#475569",
+        "target-arrow-color": "#475569", "target-arrow-shape": "triangle",
+        "curve-style": "bezier", "arrow-scale": 1.2,
+      }},
+    { selector: "edge[style='dashed']", style: {
+        "width": 2, "line-color": "#f87171", "line-style": "dashed",
+        "target-arrow-color": "#f87171", "target-arrow-shape": "triangle",
+        "curve-style": "bezier", "arrow-scale": 1.2,
+      }},
   ];
 }
 
