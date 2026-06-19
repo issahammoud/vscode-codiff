@@ -89,108 +89,21 @@ export class DiffPanel {
   <title>codiff</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     body {
       font-family: var(--vscode-font-family);
       font-size: 13px;
-      line-height: 1.5;
       color: var(--vscode-foreground);
       background: var(--vscode-editor-background);
-      padding: 20px;
-      overflow-x: auto;
-    }
-
-    /* ── Loading / empty ─────────────────────────────────── */
-    .empty {
-      text-align: center;
-      padding: 60px 0;
-      color: var(--vscode-descriptionForeground);
-      font-size: 13px;
     }
     #status {
-      position: fixed;
-      top: 10px; right: 14px;
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      display: none;
-      align-items: center;
-      gap: 5px;
+      position: fixed; top: 8px; right: 12px;
+      font-size: 11px; color: var(--vscode-descriptionForeground);
       background: var(--vscode-editor-background);
-      padding: 3px 8px;
-      border-radius: 4px;
       border: 1px solid var(--vscode-panel-border);
-      z-index: 10;
+      border-radius: 4px; padding: 3px 8px;
+      display: none; align-items: center; gap: 5px; z-index: 20;
     }
     #status.visible { display: flex; }
-
-    /* ── Summary bar ─────────────────────────────────────── */
-    .summary {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-bottom: 20px;
-    }
-    .badge {
-      padding: 2px 10px;
-      border-radius: 999px;
-      font-size: 11.5px;
-      font-weight: 700;
-      letter-spacing: 0.02em;
-    }
-    .badge.add { background: #dcfce7; color: #166534; }
-    .badge.mod { background: #fef9c3; color: #854d0e; }
-    .badge.rem { background: #fee2e2; color: #991b1b; }
-    .muted { color: var(--vscode-descriptionForeground); font-size: 12px; }
-    .ref   { margin-left: auto; font-family: monospace; }
-
-    /* ── Module grid ─────────────────────────────────────── */
-    .modules {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 16px;
-      align-items: flex-start;
-    }
-
-    .module-card {
-      border-radius: 10px;
-      border: 1.5px solid var(--vscode-panel-border);
-      overflow: hidden;
-      min-width: 220px;
-      max-width: 340px;
-      flex: 1 1 240px;
-      background: var(--vscode-sideBar-background, var(--vscode-editor-background));
-    }
-    .module-card.add { border-color: #4ade80; }
-    .module-card.mod { border-color: #fbbf24; }
-    .module-card.rem { border-color: #f87171; }
-
-    .module-header {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      background: #0f172a;
-      color: #f8fafc;
-      padding: 8px 12px;
-      font-family: var(--vscode-editor-font-family, monospace);
-      font-size: 11px;
-      letter-spacing: 0.01em;
-    }
-    .module-icon { font-size: 13px; flex-shrink: 0; }
-    .module-path { word-break: break-all; }
-
-    .module-body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
-
-    /* ── Class card ──────────────────────────────────────── */
-    .class-card {
-      border-radius: 7px;
-      border: 1.5px solid var(--vscode-panel-border);
-      overflow: hidden;
-      background: var(--vscode-editor-background);
-    }
-    .class-card.add { border-color: #86efac; }
-    .class-card.mod { border-color: #fde68a; }
-    .class-card.rem { border-color: #fca5a5; }
 
     .class-header {
       display: flex;
@@ -201,86 +114,45 @@ export class DiffPanel {
       font-size: 12px;
       font-weight: 600;
     }
-    .class-card.add .class-header { background: #f0fdf4; color: #166534; }
-    .class-card.mod .class-header { background: #fefce8; color: #854d0e; }
-    .class-card.rem .class-header { background: #fff1f2; color: #991b1b; }
-
-    .standalone-header { opacity: 0.75; }
-    .muted-name        { font-style: italic; font-weight: 400; }
-
-    .class-icon {
-      width: 18px; height: 18px;
-      border-radius: 4px;
-      display: inline-flex; align-items: center; justify-content: center;
-      font-size: 10px; font-weight: 800;
-      flex-shrink: 0;
+    /* ── Cytoscape canvas fills remaining space ─────────── */
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      display: flex; flex-direction: column;
+      padding: 0;
     }
-    .class-card.add .class-icon { background: #86efac; color: #14532d; }
-    .class-card.mod .class-icon { background: #fde68a; color: #78350f; }
-    .class-card.rem .class-icon { background: #fca5a5; color: #7f1d1d; }
-    .class-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #root { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
 
-    /* ── Methods ─────────────────────────────────────────── */
-    .methods { padding: 4px 0; }
-
-    .method {
-      display: flex;
-      align-items: baseline;
-      gap: 6px;
-      padding: 3px 10px;
-      font-family: var(--vscode-editor-font-family, monospace);
-      font-size: 12px;
-      cursor: pointer;
-      border-radius: 4px;
-      margin: 1px 4px;
-      transition: background 0.1s;
-    }
-    .method:hover { background: var(--vscode-list-hoverBackground); }
-
-    .vis {
-      font-weight: 700;
-      width: 12px;
-      flex-shrink: 0;
-      text-align: center;
-    }
-    .method.add .vis { color: #16a34a; }
-    .method.mod .vis { color: #d97706; }
-    .method.rem .vis { color: #dc2626; }
-
-    .fn-name  { color: var(--vscode-foreground); flex-shrink: 0; }
-    .struck   { text-decoration: line-through; opacity: 0.6; }
-
-    .hint {
-      color: var(--vscode-descriptionForeground);
-      font-size: 11px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    /* ── Relationships ───────────────────────────────────── */
-    .relationships {
-      margin-top: 24px;
-      border-top: 1px solid var(--vscode-panel-border);
-      padding-top: 16px;
-    }
-    .rel-title {
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--vscode-descriptionForeground);
-      margin-bottom: 10px;
-    }
-    .rel-list  { display: flex; flex-direction: column; gap: 4px; }
-    .rel-row   {
+    .summary {
       display: flex; align-items: center; gap: 8px;
-      font-family: var(--vscode-editor-font-family, monospace);
-      font-size: 12px;
+      flex-wrap: wrap; padding: 9px 14px;
+      border-bottom: 1px solid var(--vscode-panel-border);
+      flex-shrink: 0;
     }
-    .rel-src   { color: var(--vscode-foreground); }
-    .rel-arrow { color: var(--vscode-descriptionForeground); }
-    .rel-dst   { color: var(--vscode-foreground); }
+    .badge { padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .badge.add { background: #dcfce7; color: #166534; }
+    .badge.mod { background: #fef9c3; color: #854d0e; }
+    .badge.rem { background: #fee2e2; color: #991b1b; }
+    .muted  { color: var(--vscode-descriptionForeground); font-size: 12px; }
+    .ref    { margin-left: auto; font-family: monospace; font-size: 11px; }
+
+    .zoom-controls {
+      position: absolute; bottom: 16px; right: 16px;
+      display: flex; flex-direction: column; gap: 4px; z-index: 10;
+    }
+    .zoom-controls button {
+      width: 28px; height: 28px;
+      border: 1px solid var(--vscode-panel-border);
+      background: var(--vscode-editor-background);
+      color: var(--vscode-foreground);
+      border-radius: 5px; cursor: pointer;
+      font-size: 15px; font-weight: 600;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .zoom-controls button:hover { background: var(--vscode-list-hoverBackground); }
+
+    #cy { flex: 1; position: relative; width: 100%; min-height: 0; }
+    .empty { text-align: center; padding: 60px 0; color: var(--vscode-descriptionForeground); }
+    code { font-family: monospace; }
   </style>
 </head>
 <body>

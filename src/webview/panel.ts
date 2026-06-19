@@ -1,6 +1,9 @@
-declare const acquireVsCodeApi: () => {
-  postMessage: (msg: unknown) => void;
-};
+import cytoscape from "cytoscape";
+// @ts-ignore – no bundled types for cytoscape-dagre
+import dagre from "cytoscape-dagre";
+cytoscape.use(dagre);
+
+declare const acquireVsCodeApi: () => { postMessage: (msg: unknown) => void };
 const vscode = acquireVsCodeApi();
 
 // ── DOM ────────────────────────────────────────────────────────────────────────
@@ -8,36 +11,14 @@ const statusEl = document.getElementById("status")!;
 const emptyEl  = document.getElementById("empty")!;
 const rootEl   = document.getElementById("root")!;
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-interface Summary {
-  added_functions: number; modified_functions: number;
-  removed_functions: number; modules_touched: string[];
-}
-interface AddedFn {
-  function_id: string; file_path: string; class_name: string | null;
-  is_entry_point: boolean; new_callers: string[]; existing_callers: string[];
-  new_calls: string[]; existing_calls: string[];
-}
-interface ModifiedFn {
-  function_id: string; file_path: string; class_name: string | null;
-  signature_changed: boolean; calls_added_new: string[];
-  calls_added_existing: string[]; calls_removed: string[]; callers: string[];
-}
-interface RemovedFn {
-  function_id: string; file_path: string; class_name: string | null;
-  was_called_by: string[];
-}
-interface DiffData {
-  schema_version: string; base_ref: string; head_ref: string;
-  summary: Summary; added: AddedFn[]; modified: ModifiedFn[]; removed: RemovedFn[];
-}
+let cy: cytoscape.Core | undefined;
 
 // ── Messages ───────────────────────────────────────────────────────────────────
 window.addEventListener("message", (e: MessageEvent) => {
   const msg = e.data as { type: string; data?: DiffData; status?: string };
   if (msg.type === "status") {
     if (msg.status === "refreshing") {
-      statusEl.textContent = "↻ refreshing…";
+      statusEl.textContent = "↻  refreshing…";
       statusEl.classList.add("visible");
       emptyEl.style.display = "none";
     } else {
@@ -49,192 +30,287 @@ window.addEventListener("message", (e: MessageEvent) => {
   }
 });
 
-// ── Main renderer ──────────────────────────────────────────────────────────────
-function render(data: DiffData) {
-  statusEl.classList.remove("visible");
-  emptyEl.style.display   = "none";
-  rootEl.innerHTML = buildHtml(data);
+// ── Types ──────────────────────────────────────────────────────────────────────
+interface Summary { added_functions: number; modified_functions: number; removed_functions: number; modules_touched: string[]; }
+interface AddedFn   { function_id: string; file_path: string; class_name: string | null; is_entry_point: boolean; new_callers: string[]; existing_callers: string[]; new_calls: string[]; existing_calls: string[]; }
+interface ModifiedFn{ function_id: string; file_path: string; class_name: string | null; signature_changed: boolean; calls_added_new: string[]; calls_added_existing: string[]; calls_removed: string[]; callers: string[]; }
+interface RemovedFn { function_id: string; file_path: string; class_name: string | null; was_called_by: string[]; }
+interface DiffData  { schema_version: string; base_ref: string; head_ref: string; summary: Summary; added: AddedFn[]; modified: ModifiedFn[]; removed: RemovedFn[]; }
 
-  // click → navigate (pass both functionId and filePath for direct file open)
-  rootEl.querySelectorAll<HTMLElement>("[data-fid]").forEach(el => {
-    el.addEventListener("click", () =>
-      vscode.postMessage({
-        type: "navigate",
-        functionId: el.dataset.fid,
-        filePath:   el.dataset.fp,
-      })
-    );
-  });
+// ── Change colours ─────────────────────────────────────────────────────────────
+const C = {
+  added:    { border: "#4ade80", header: "#16a34a", text: "#14532d", bg: "#f0fdf4" },
+  modified: { border: "#fbbf24", header: "#d97706", text: "#78350f", bg: "#fefce8" },
+  removed:  { border: "#f87171", header: "#dc2626", text: "#7f1d1d", bg: "#fff1f2" },
+} as const;
+type ChangeType = keyof typeof C;
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+const san  = (s: string) => s.replace(/[^a-zA-Z0-9]/g, "_");
+const last = (id: string) => id.split(".").at(-1) ?? id;
+
+type Members = { added: AddedFn[]; modified: ModifiedFn[]; removed: RemovedFn[] };
+
+function dominant(m: Members): ChangeType {
+  if (!m.added.length && !m.modified.length) return "removed";
+  if (!m.modified.length && !m.removed.length) return "added";
+  return "modified";
 }
 
-// ── HTML builder ───────────────────────────────────────────────────────────────
-function buildHtml(data: DiffData): string {
-  const { summary, added, modified, removed, base_ref, head_ref } = data;
-  const total = summary.added_functions + summary.modified_functions + summary.removed_functions;
+function buildLabel(className: string | null, m: Members): string {
+  const title = className ?? "«standalone»";
+  const sep   = "─".repeat(Math.max(title.length, 14));
+  const lines: string[] = [title, sep];
 
-  if (total === 0) {
-    return `<div class="empty">No structural changes detected between <code>${esc(base_ref)}</code> and <code>${esc(head_ref)}</code>.</div>`;
+  const hint = (fn: AddedFn) =>
+    fn.is_entry_point ? "  ⦿" :
+    fn.new_callers.length + fn.existing_callers.length > 0 ? `  ←${fn.new_callers.length + fn.existing_callers.length}` : "";
+
+  for (const fn of m.added)    lines.push(`+ ${last(fn.function_id)}()${hint(fn)}`);
+  for (const fn of m.modified) {
+    const h = fn.signature_changed ? " sig" : fn.calls_added_new.length || fn.calls_removed.length ? " calls" : " body";
+    lines.push(`~ ${last(fn.function_id)}()${h}`);
   }
+  for (const fn of m.removed)  lines.push(`− ${last(fn.function_id)}()`);
+
+  return lines.join("\n");
+}
+
+// ── Build Cytoscape elements ───────────────────────────────────────────────────
+function buildElements(data: DiffData): cytoscape.ElementDefinition[] {
+  const els: cytoscape.ElementDefinition[] = [];
 
   // Group by file → class
-  type Members = { added: AddedFn[]; modified: ModifiedFn[]; removed: RemovedFn[] };
   const byFile = new Map<string, Map<string | null, Members>>();
-
   const ensure = (fp: string, cn: string | null) => {
     if (!byFile.has(fp)) byFile.set(fp, new Map());
     const m = byFile.get(fp)!;
     if (!m.has(cn)) m.set(cn, { added: [], modified: [], removed: [] });
     return m.get(cn)!;
   };
-  added.forEach(fn    => ensure(fn.file_path, fn.class_name).added.push(fn));
-  modified.forEach(fn => ensure(fn.file_path, fn.class_name).modified.push(fn));
-  removed.forEach(fn  => ensure(fn.file_path, fn.class_name).removed.push(fn));
+  data.added.forEach(fn    => ensure(fn.file_path, fn.class_name).added.push(fn));
+  data.modified.forEach(fn => ensure(fn.file_path, fn.class_name).modified.push(fn));
+  data.removed.forEach(fn  => ensure(fn.file_path, fn.class_name).removed.push(fn));
 
-  // Build relationship index: fid → cid (class card id)
-  const san = (s: string) => s.replace(/[^a-zA-Z0-9]/g, "_");
-  const fidToCid = new Map<string, string>();
-  byFile.forEach((classes, fp) => {
-    classes.forEach((_, cn) => {
-      const cid = cn ? san(`${fp}__${cn}`) : san(`${fp}__standalone`);
-      classes.get(cn)!.added.forEach(fn    => fidToCid.set(fn.function_id, cid));
-      classes.get(cn)!.modified.forEach(fn => fidToCid.set(fn.function_id, cid));
-      classes.get(cn)!.removed.forEach(fn  => fidToCid.set(fn.function_id, cid));
-    });
-  });
+  // Build fn_id → node id lookup for edges
+  const fidToNid = new Map<string, string>();
 
-  // Collect edges between class cards
-  const edges = new Set<string>();
-  added.forEach(fn => {
-    const src = fidToCid.get(fn.function_id);
+  for (const [filePath, classes] of byFile) {
+    const nsId = `ns_${san(filePath)}`;
+
+    // Namespace parent node
+    els.push({ data: { id: nsId, label: filePath.replace(/\.py$/, ""), type: "namespace" } });
+
+    for (const [className, members] of classes) {
+      const nid = className
+        ? `cls_${san(filePath)}_${san(className)}`
+        : `mod_${san(filePath)}`;
+      const change = dominant(members);
+
+      els.push({
+        data: {
+          id:        nid,
+          parent:    nsId,
+          label:     buildLabel(className, members),
+          type:      "class",
+          change,
+          filePath,
+          className: className ?? null,
+          // Primary functionId for navigation (first changed fn in this class)
+          functionId: [
+            ...members.added.map(f => f.function_id),
+            ...members.modified.map(f => f.function_id),
+            ...members.removed.map(f => f.function_id),
+          ][0] ?? "",
+        },
+      });
+
+      // Register all member fn_ids → this node
+      [...members.added, ...members.modified, ...members.removed]
+        .forEach(fn => fidToNid.set(fn.function_id, nid));
+    }
+  }
+
+  // Edges between class nodes (deduplicated)
+  const seen = new Set<string>();
+  const addEdge = (srcNid: string, dstNid: string, style: "solid" | "dashed") => {
+    if (srcNid === dstNid) return;
+    const key = `${srcNid}→${dstNid}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    els.push({ data: { source: srcNid, target: dstNid, style } });
+  };
+
+  data.added.forEach(fn => {
+    const src = fidToNid.get(fn.function_id);
+    if (!src) return;
     [...fn.new_calls, ...fn.new_callers].forEach(fid => {
-      const dst = fidToCid.get(fid);
-      if (src && dst && src !== dst) edges.add(`${src}→${dst}`);
+      const dst = fidToNid.get(fid);
+      if (dst) addEdge(src, dst, "solid");
     });
   });
-  modified.forEach(fn => {
-    const src = fidToCid.get(fn.function_id);
-    [...fn.calls_added_new].forEach(fid => {
-      const dst = fidToCid.get(fid);
-      if (src && dst && src !== dst) edges.add(`${src}→${dst}`);
+  data.modified.forEach(fn => {
+    const src = fidToNid.get(fn.function_id);
+    if (!src) return;
+    fn.calls_added_new.forEach(fid => {
+      const dst = fidToNid.get(fid);
+      if (dst) addEdge(src, dst, "solid");
+    });
+    fn.calls_removed.forEach(fid => {
+      const dst = fidToNid.get(fid);
+      if (dst) addEdge(src, dst, "dashed");
     });
   });
 
-  const parts: string[] = [];
-
-  // ── Summary bar ──────────────────────────────────────────────────────────────
-  parts.push(`<div class="summary">`);
-  if (summary.added_functions)    parts.push(`<span class="badge add">+${summary.added_functions} added</span>`);
-  if (summary.modified_functions) parts.push(`<span class="badge mod">~${summary.modified_functions} modified</span>`);
-  if (summary.removed_functions)  parts.push(`<span class="badge rem">−${summary.removed_functions} removed</span>`);
-  parts.push(`<span class="muted">${summary.modules_touched.length} module${summary.modules_touched.length !== 1 ? "s" : ""}</span>`);
-  parts.push(`<span class="muted ref">${esc(base_ref)} → ${esc(head_ref)}</span>`);
-  parts.push(`</div>`);
-
-  // ── Module cards ──────────────────────────────────────────────────────────────
-  parts.push(`<div class="modules">`);
-
-  for (const [filePath, classes] of [...byFile.entries()].sort()) {
-    // Dominant change type for module border accent
-    const allAdded    = [...classes.values()].flatMap(m => m.added).length;
-    const allModified = [...classes.values()].flatMap(m => m.modified).length;
-    const allRemoved  = [...classes.values()].flatMap(m => m.removed).length;
-    const accent = allRemoved && !allAdded && !allModified ? "rem" : allAdded && !allModified && !allRemoved ? "add" : "mod";
-
-    parts.push(`<div class="module-card ${accent}">`);
-    parts.push(`  <div class="module-header">`);
-    parts.push(`    <span class="module-icon">📄</span>`);
-    parts.push(`    <span class="module-path">${esc(filePath)}</span>`);
-    parts.push(`  </div>`);
-    parts.push(`  <div class="module-body">`);
-
-    // Sort: standalone first, then classes alphabetically
-    const sortedClasses: Array<[string | null, Members]> = [
-      ...(classes.has(null) ? [[null, classes.get(null)!]] as [null, Members][] : []),
-      ...[...classes.entries()].filter(([cn]) => cn !== null).sort(([a], [b]) => (a ?? "").localeCompare(b ?? "")),
-    ];
-
-    for (const [className, members] of sortedClasses) {
-      const cid = className ? san(`${filePath}__${className}`) : san(`${filePath}__standalone`);
-      const allFids = [...members.added, ...members.modified, ...members.removed].map(f => f.function_id);
-      const classAccent = members.removed.length && !members.added.length && !members.modified.length ? "rem"
-                        : members.added.length && !members.modified.length && !members.removed.length ? "add"
-                        : "mod";
-
-      parts.push(`  <div class="class-card ${classAccent}" id="${cid}">`);
-      if (className) {
-        parts.push(`    <div class="class-header">`);
-        parts.push(`      <span class="class-icon">C</span>`);
-        parts.push(`      <span class="class-name">${esc(className)}</span>`);
-        parts.push(`    </div>`);
-      } else {
-        parts.push(`    <div class="class-header standalone-header">`);
-        parts.push(`      <span class="class-icon">ƒ</span>`);
-        parts.push(`      <span class="class-name muted-name">standalone</span>`);
-        parts.push(`    </div>`);
-      }
-      parts.push(`    <div class="methods">`);
-
-      for (const fn of members.added) {
-        const name = fn.function_id.split(".").at(-1)!;
-        const hint = fn.is_entry_point ? "entry point"
-                   : (fn.new_callers.length + fn.existing_callers.length) > 0
-                     ? `← ${fn.new_callers.length + fn.existing_callers.length} caller${fn.new_callers.length + fn.existing_callers.length !== 1 ? "s" : ""}`
-                     : "";
-        parts.push(`    <div class="method add" data-fid="${esc(fn.function_id)}" data-fp="${esc(fn.file_path)}">`);
-        parts.push(`      <span class="vis">+</span>`);
-        parts.push(`      <span class="fn-name">${esc(name)}()</span>`);
-        if (hint) parts.push(`      <span class="hint">${esc(hint)}</span>`);
-        parts.push(`    </div>`);
-      }
-
-      for (const fn of members.modified) {
-        const name = fn.function_id.split(".").at(-1)!;
-        const hint = fn.signature_changed ? "sig changed"
-                   : (fn.calls_added_new.length || fn.calls_removed.length) ? "calls changed"
-                   : "body changed";
-        parts.push(`    <div class="method mod" data-fid="${esc(fn.function_id)}" data-fp="${esc(fn.file_path)}">`);
-        parts.push(`      <span class="vis">~</span>`);
-        parts.push(`      <span class="fn-name">${esc(name)}()</span>`);
-        parts.push(`      <span class="hint">${esc(hint)}</span>`);
-        parts.push(`    </div>`);
-      }
-
-      for (const fn of members.removed) {
-        const name = fn.function_id.split(".").at(-1)!;
-        const hint = fn.was_called_by.length > 0 ? `← ${fn.was_called_by.length} caller${fn.was_called_by.length !== 1 ? "s" : ""} affected` : "";
-        parts.push(`    <div class="method rem" data-fid="${esc(fn.function_id)}" data-fp="${esc(fn.file_path)}">`);
-        parts.push(`      <span class="vis">−</span>`);
-        parts.push(`      <span class="fn-name struck">${esc(name)}()</span>`);
-        if (hint) parts.push(`      <span class="hint">${esc(hint)}</span>`);
-        parts.push(`    </div>`);
-      }
-
-      parts.push(`    </div>`); // .methods
-      parts.push(`  </div>`);   // .class-card
-    }
-
-    parts.push(`  </div>`); // .module-body
-    parts.push(`</div>`);   // .module-card
-  }
-
-  parts.push(`</div>`); // .modules
-
-  // ── Relationships ─────────────────────────────────────────────────────────────
-  if (edges.size > 0) {
-    parts.push(`<div class="relationships">`);
-    parts.push(`  <div class="rel-title">Call relationships</div>`);
-    parts.push(`  <div class="rel-list">`);
-    for (const edge of [...edges].sort()) {
-      const [src, dst] = edge.split("→");
-      parts.push(`    <div class="rel-row"><span class="rel-src">${esc(src.replace(/_/g, " ").trim())}</span><span class="rel-arrow">→</span><span class="rel-dst">${esc(dst.replace(/_/g, " ").trim())}</span></div>`);
-    }
-    parts.push(`  </div>`);
-    parts.push(`</div>`);
-  }
-
-  return parts.join("\n");
+  return els;
 }
 
-function esc(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+// ── Cytoscape styles ───────────────────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildStyle(): any[] {
+  // Namespace style
+  const nsStyle: cytoscape.Css.Node = {
+    "background-color":    "#0f172a",
+    "background-opacity":  0.9,
+    "border-width":        0,
+    "label":               "data(label)",
+    "color":               "#94a3b8",
+    "font-family":         "ui-monospace, SFMono-Regular, Menlo, monospace",
+    "font-size":           "11px",
+    "text-valign":         "bottom",
+    "text-halign":         "center",
+    "text-margin-y":       6,
+    "shape":               "round-rectangle",
+    "padding":             "16px",
+  };
+
+  // Base class style (overridden per change type below)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const classBase: any = {
+    "shape":               "round-rectangle",
+    "label":               "data(label)",
+    "font-family":         "ui-monospace, SFMono-Regular, Menlo, monospace",
+    "font-size":           "12px",
+    "text-valign":         "center",
+    "text-halign":         "left",
+    "text-wrap":           "pre",
+    "text-max-width":      "280px",
+    "padding":             "10px 14px",
+    "border-width":        2,
+    "width":               "label",
+    "height":              "label",
+    "text-background-opacity": 0,
+    "transition-property":     "border-width, border-color",
+    "transition-duration":     "0.1s",
+  };
+
+  // Hover
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const classHover: any = {
+    "border-width": 3,
+    "cursor": "pointer",
+  };
+
+  // Edge style
+  const edgeSolid: cytoscape.Css.Edge = {
+    "width":             2,
+    "line-color":        "#64748b",
+    "target-arrow-color":"#64748b",
+    "target-arrow-shape":"triangle",
+    "curve-style":       "bezier",
+    "arrow-scale":       1.2,
+  };
+  const edgeDashed: cytoscape.Css.Edge = {
+    ...edgeSolid,
+    "line-style":        "dashed",
+    "line-color":        "#f87171",
+    "target-arrow-color":"#f87171",
+  };
+
+  return [
+    { selector: "[type='namespace']",             style: nsStyle   },
+    { selector: "[type='class']",                 style: { ...classBase, "background-color": "#ffffff", "border-color": "#e2e8f0", "color": "#1e293b" } },
+    { selector: "[type='class'][change='added']",   style: { "background-color": C.added.bg,    "border-color": C.added.border,    "color": C.added.text    } },
+    { selector: "[type='class'][change='modified']",style: { "background-color": C.modified.bg, "border-color": C.modified.border, "color": C.modified.text } },
+    { selector: "[type='class'][change='removed']", style: { "background-color": C.removed.bg,  "border-color": C.removed.border,  "color": C.removed.text  } },
+    { selector: "[type='class']:hover",             style: classHover },
+    { selector: "[style='solid']",                  style: edgeSolid  },
+    { selector: "[style='dashed']",                 style: edgeDashed },
+  ];
+}
+
+// ── Main render ────────────────────────────────────────────────────────────────
+function render(data: DiffData) {
+  emptyEl.style.display = "none";
+  rootEl.innerHTML = "";
+
+  const total = data.summary.added_functions + data.summary.modified_functions + data.summary.removed_functions;
+  if (total === 0) {
+    rootEl.innerHTML = `<p class="empty">No structural changes between <code>${esc(data.base_ref)}</code> and <code>${esc(data.head_ref)}</code>.</p>`;
+    return;
+  }
+
+  // ── Summary bar ──────────────────────────────────────────────────────────────
+  const parts: string[] = [`<div class="summary">`];
+  if (data.summary.added_functions)    parts.push(`<span class="badge add">+${data.summary.added_functions} added</span>`);
+  if (data.summary.modified_functions) parts.push(`<span class="badge mod">~${data.summary.modified_functions} modified</span>`);
+  if (data.summary.removed_functions)  parts.push(`<span class="badge rem">−${data.summary.removed_functions} removed</span>`);
+  parts.push(`<span class="muted">${data.summary.modules_touched.length} modules</span>`);
+  parts.push(`<span class="muted ref">${esc(data.base_ref)} → ${esc(data.head_ref)}</span>`);
+  parts.push(`</div>`);
+
+  // ── Zoom controls ─────────────────────────────────────────────────────────────
+  parts.push(`
+    <div class="zoom-controls">
+      <button id="zoom-in"  title="Zoom in">+</button>
+      <button id="zoom-fit" title="Fit to screen">⊡</button>
+      <button id="zoom-out" title="Zoom out">−</button>
+    </div>
+  `);
+
+  // ── Cytoscape container ───────────────────────────────────────────────────────
+  parts.push(`<div id="cy"></div>`);
+  rootEl.innerHTML = parts.join("");
+
+  const cyEl = document.getElementById("cy")!;
+
+  cy = cytoscape({
+    container: cyEl,
+    elements:  buildElements(data),
+    style:     buildStyle(),
+    // @ts-ignore – dagre options not in base type
+    layout: {
+      name:     "dagre",
+      rankDir:  "LR",
+      rankSep:  100,
+      nodeSep:  30,
+      edgeSep:  10,
+      padding:  30,
+      compound: true,
+      ranker:   "tight-tree",
+    } as cytoscape.LayoutOptions,
+    minZoom: 0.05,
+    maxZoom: 4,
+    wheelSensitivity: 0.2,
+    boxSelectionEnabled: false,
+    userPanningEnabled:  true,
+    userZoomingEnabled:  true,
+  });
+
+  // Click → navigate to file
+  cy.on("tap", "node[type='class']", (evt) => {
+    const d = evt.target.data();
+    if (d.functionId && d.filePath) {
+      vscode.postMessage({ type: "navigate", functionId: d.functionId, filePath: d.filePath });
+    }
+  });
+
+  // Zoom controls
+  document.getElementById("zoom-in")! .addEventListener("click", () => cy!.zoom({ level: cy!.zoom() * 1.3, renderedPosition: { x: cyEl.clientWidth / 2, y: cyEl.clientHeight / 2 } }));
+  document.getElementById("zoom-out")!.addEventListener("click", () => cy!.zoom({ level: cy!.zoom() / 1.3, renderedPosition: { x: cyEl.clientWidth / 2, y: cyEl.clientHeight / 2 } }));
+  document.getElementById("zoom-fit")!.addEventListener("click", () => cy!.fit(undefined, 30));
+}
+
+function esc(s: string) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

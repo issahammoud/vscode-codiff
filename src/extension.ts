@@ -136,8 +136,9 @@ export async function navigateToFunction(
     }
 
     await vscode.window.showTextDocument(doc, {
-      selection: new vscode.Range(pos, pos),
-      preview: false,
+      viewColumn: vscode.ViewColumn.One,
+      selection:  new vscode.Range(pos, pos),
+      preview:    false,
     });
   } catch {
     vscode.window.showWarningMessage(`codiff: could not open ${filePath}`);
