@@ -220,7 +220,11 @@ function buildSVG(nodes:Node[], edges:Edge[]): string {
     <filter id="sh" x="-10%" y="-10%" width="120%" height="120%">
       <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="rgba(0,0,0,0.1)"/>
     </filter>
-  </defs>`);
+  </defs>
+  <style>
+    .mrow { transition: opacity 0.12s ease; cursor: pointer; }
+    .mbg  { transition: fill 0.12s ease; }
+  </style>`);
 
   // ── Namespace backgrounds ────────────────────────────────────────────────────
   for (const [fp,fnodes] of byFile) {
@@ -333,11 +337,80 @@ async function render(data:DiffData) {
     set(orig[0],orig[1],orig[2],orig[3]);
   });
 
-  // Per-method click + hover
-  svgEl.querySelectorAll<SVGTextElement>(".mrow").forEach(el=>{
-    const bg=el.previousElementSibling as SVGRectElement|null;
-    el.addEventListener("mouseenter",()=>bg?.setAttribute("fill","rgba(0,0,0,0.07)"));
-    el.addEventListener("mouseleave",()=>bg?.setAttribute("fill","transparent"));
-    el.addEventListener("click",e=>{e.stopPropagation();vscode.postMessage({type:"navigate",functionId:el.dataset.fid,filePath:el.dataset.fp});});
+  // ── Build call-relationship maps for hover highlighting ───────────────────────
+  const callerToCallees = new Map<string,Set<string>>();
+  const calleeToCallers = new Map<string,Set<string>>();
+  edges.forEach(e => {
+    if (!callerToCallees.has(e.callerFid)) callerToCallees.set(e.callerFid, new Set());
+    callerToCallees.get(e.callerFid)!.add(e.calleeFid);
+    if (!calleeToCallers.has(e.calleeFid)) calleeToCallers.set(e.calleeFid, new Set());
+    calleeToCallers.get(e.calleeFid)!.add(e.callerFid);
   });
+
+  const allRows = svgEl.querySelectorAll<SVGTextElement>(".mrow");
+  const allBgs  = svgEl.querySelectorAll<SVGRectElement>(".mbg");
+
+  const resetHighlight = () => {
+    allRows.forEach(r => { r.style.opacity = ""; });
+    allBgs.forEach(b  => { b.setAttribute("fill","transparent"); });
+    legend.style.display = "none";
+  };
+
+  // Legend overlay (shown while hovering)
+  const legend = document.createElement("div");
+  legend.style.cssText = "display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);"
+    + "background:rgba(15,23,42,0.85);color:#f1f5f9;border-radius:6px;padding:5px 14px;"
+    + "font-size:11px;font-family:ui-monospace,monospace;pointer-events:none;"
+    + "display:flex;gap:16px;align-items:center;white-space:nowrap;";
+  legend.innerHTML = `<span><span style="color:#86efac">■</span> callee (this calls)</span>`
+    + `<span><span style="color:#93c5fd">■</span> caller (calls this)</span>`;
+  legend.style.display = "none";
+  wrap.appendChild(legend);
+
+  // ── Per-method hover highlight ─────────────────────────────────────────────────
+  allRows.forEach(el => {
+    const bg = el.previousElementSibling as SVGRectElement|null;
+
+    el.addEventListener("mouseenter", () => {
+      const fid     = el.dataset.fid ?? "";
+      const callees = callerToCallees.get(fid) ?? new Set<string>();
+      const callers = calleeToCallers.get(fid) ?? new Set<string>();
+      const hasRels = callees.size > 0 || callers.size > 0;
+
+      // Dim everything
+      allRows.forEach(r => r.style.opacity = hasRels ? "0.12" : "1");
+      allBgs.forEach(b  => b.setAttribute("fill","transparent"));
+
+      // Self: full, subtle bg
+      el.style.opacity = "1";
+      bg?.setAttribute("fill","rgba(0,0,0,0.08)");
+
+      // Callees: light green
+      allRows.forEach(r => {
+        if (callees.has(r.dataset.fid ?? "")) {
+          r.style.opacity = "1";
+          (r.previousElementSibling as SVGRectElement|null)?.setAttribute("fill","rgba(134,239,172,0.35)");
+        }
+      });
+
+      // Callers: light blue
+      allRows.forEach(r => {
+        if (callers.has(r.dataset.fid ?? "")) {
+          r.style.opacity = "1";
+          (r.previousElementSibling as SVGRectElement|null)?.setAttribute("fill","rgba(147,197,253,0.35)");
+        }
+      });
+
+      if (hasRels) { legend.style.display = "flex"; }
+    });
+
+    el.addEventListener("mouseleave", resetHighlight);
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      vscode.postMessage({type:"navigate",functionId:el.dataset.fid,filePath:el.dataset.fp});
+    });
+  });
+
+  // Click on background resets
+  svgEl.addEventListener("click", resetHighlight);
 }
