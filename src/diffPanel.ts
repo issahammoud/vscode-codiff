@@ -95,43 +95,76 @@ export class DiffPanel {
              style-src 'unsafe-inline';" />
   <title>codiff</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
       font-family: var(--vscode-font-family);
-      font-size: var(--vscode-font-size);
+      font-size: 13px;
       color: var(--vscode-foreground);
       background: var(--vscode-editor-background);
-      padding: 16px;
+      padding: 20px 24px;
       overflow-x: auto;
+      min-height: 100vh;
     }
-    #loading {
-      display: none;
-      color: var(--vscode-descriptionForeground);
-      font-style: italic;
-      padding: 32px 0;
+
+    #loading, #empty {
       text-align: center;
-    }
-    #empty {
+      padding: 60px 0;
       color: var(--vscode-descriptionForeground);
-      font-style: italic;
-      padding: 32px 0;
-      text-align: center;
-    }
-    #diagram { width: 100%; }
-    .summary {
-      display: flex;
-      gap: 16px;
-      margin-bottom: 20px;
       font-size: 13px;
     }
+    #loading { display: none; }
+
+    #summary {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
     .badge {
-      padding: 2px 8px;
-      border-radius: 4px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 12px;
       font-weight: 600;
+      letter-spacing: 0.01em;
     }
     .badge-added    { background: #dcfce7; color: #166534; }
-    .badge-modified { background: #fefce8; color: #854d0e; }
-    .badge-removed  { background: #fff1f2; color: #9f1239; }
+    .badge-modified { background: #fef9c3; color: #854d0e; }
+    .badge-removed  { background: #fee2e2; color: #991b1b; }
+
+    .dim {
+      color: var(--vscode-descriptionForeground);
+      font-size: 12px;
+    }
+
+    .svg-wrap {
+      border-radius: 12px;
+      overflow: hidden;
+      display: inline-block;
+      max-width: 100%;
+    }
+    .svg-wrap svg {
+      display: block;
+      max-width: 100%;
+      height: auto;
+    }
+
+    .mermaid-src {
+      background: var(--vscode-textCodeBlock-background);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 6px;
+      padding: 12px 16px;
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--vscode-editor-foreground);
+    }
   </style>
 </head>
 <body>
