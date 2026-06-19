@@ -217,12 +217,6 @@ function buildSVG(nodes:Node[], edges:Edge[]): string {
   const p:string[] = [];
   p.push(`<svg id="uml-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalW} ${totalH}" style="width:100%;height:100%;display:block">`);
   p.push(`<defs>
-    <marker id="a-s" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
-      <polygon points="0 0,10 4,0 8" fill="#3b82f6"/>
-    </marker>
-    <marker id="a-d" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
-      <polygon points="0 0,10 4,0 8" fill="#f87171"/>
-    </marker>
     <filter id="sh" x="-10%" y="-10%" width="120%" height="120%">
       <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="rgba(0,0,0,0.1)"/>
     </filter>
@@ -246,47 +240,7 @@ function buildSVG(nodes:Node[], edges:Edge[]): string {
       <text x="${nx+12}" y="${ny+NS_HDR-9}" font-size="11" font-family="ui-monospace,monospace" font-weight="600" fill="#e2e8f0">📄 ${esc(name)}.py</text>`);
   }
 
-  // Build method-index lookup: fid → {node, rowIndex}
-  const midxMap = new Map<string,{n:Node;i:number}>();
-  nodes.forEach(n => n.methods.forEach((m,i) => midxMap.set(m.fid,{n,i})));
-
-  // Helper: absolute y-centre of a method row
-  const methodY = (n:Node,i:number) => n.y + HDR_H + i*ROW_H + ROW_H/2;
-
-  // ── Edges — anchored to method rows ──────────────────────────────────────────
-  for (const e of edges) {
-    const solid  = e.style === "solid";
-    const stroke = solid ? "#3b82f6" : "#f87171";   // blue for calls, red for removed
-    const dash   = solid ? "" : `stroke-dasharray="6,3"`;
-    const marker = solid ? "a-s" : "a-d";
-
-    // Resolve method-level anchors
-    const callerRef = midxMap.get(e.callerFid);
-    const calleeRef = midxMap.get(e.calleeFid);
-
-    let x1:number, y1:number, x2:number, y2:number;
-    if (callerRef && calleeRef) {
-      // Exit from the right edge of the caller's method row
-      x1 = callerRef.n.x + callerRef.n.w;
-      y1 = methodY(callerRef.n, callerRef.i);
-      // Enter at the left edge of the callee's method row
-      x2 = calleeRef.n.x;
-      y2 = methodY(calleeRef.n, calleeRef.i);
-    } else {
-      // Fallback: box midpoints
-      const sn=nMap.get(e.src), dn=nMap.get(e.dst); if(!sn||!dn) continue;
-      x1=sn.x+sn.w; y1=sn.y+sn.h/2; x2=dn.x; y2=dn.y+dn.h/2;
-    }
-
-    // Cubic bezier: horizontal tangents for clean S-curves
-    const dx = Math.abs(x2-x1);
-    const cx = dx*0.5;
-    const path = x2 >= x1
-      ? `M${x1},${y1} C${x1+cx},${y1} ${x2-cx},${y2} ${x2},${y2}`
-      : `M${x1},${y1} C${x1+40},${y1} ${x1+40},${y1+50} ${(x1+x2)/2},${(y1+y2)/2} S${x2-40},${y2-50} ${x2-40},${y2} ${x2},${y2}`;
-
-    p.push(`<path d="${path}" fill="none" stroke="${stroke}" stroke-width="1.5" opacity="0.85" ${dash} marker-end="url(#${marker})"/>`);
-  }
+  // Arrows removed — see discussion for better approach
 
   // ── Class nodes ──────────────────────────────────────────────────────────────
   for (const n of nodes) {
