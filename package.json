@@ -1,0 +1,89 @@
+{
+  "name": "vscode-codiff",
+  "displayName": "codiff",
+  "description": "Structural call-graph diff visualizer for Python codebases",
+  "version": "0.0.1",
+  "publisher": "issahammoud",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/issahammoud/vscode-codiff"
+  },
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": ["Visualization", "Other"],
+  "keywords": ["python", "call-graph", "diff", "code-review"],
+  "activationEvents": [
+    "workspaceContains:**/*.py"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "codiff.showDiff",
+        "title": "Show Structural Diff",
+        "category": "codiff",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "codiff.refreshDiff",
+        "title": "Refresh Diff",
+        "category": "codiff",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "codiff.showDiff",
+          "when": "resourceExtname == .py",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "codiff",
+      "properties": {
+        "codiff.executablePath": {
+          "type": "string",
+          "default": "codiff",
+          "description": "Path to the codiff executable. Defaults to 'codiff' (must be on PATH)."
+        },
+        "codiff.baseRef": {
+          "type": "string",
+          "default": "HEAD",
+          "description": "Git ref to use as the diff base."
+        },
+        "codiff.includeTests": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include test functions in the diff."
+        },
+        "codiff.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh the diff on file save."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "lint": "eslint src",
+    "package": "vsce package",
+    "vscode:prepublish": "node esbuild.js --production"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.100.0",
+    "@typescript-eslint/eslint-plugin": "^8.61.1",
+    "@typescript-eslint/parser": "^8.61.1",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "beautiful-mermaid": "^1.1.3"
+  }
+}
