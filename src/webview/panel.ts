@@ -46,7 +46,12 @@ const NS_HDR  = 28;   // namespace header strip height
 
 interface Method { fid:string; fp:string; prefix:string; name:string; hint:string; }
 interface Node   { id:string; fp:string; cn:string|null; change:Change; methods:Method[]; w:number; h:number; x:number; y:number; fid:string; }
-interface Edge   { src:string; dst:string; style:"solid"|"dashed"; pts?:{x:number;y:number}[]; }
+interface Edge   {
+  src:string; dst:string;          // class node IDs — used by ELK for layout
+  callerFid:string; calleeFid:string; // function IDs — used for SVG anchor points
+  style:"solid"|"dashed";
+  pts?:{x:number;y:number}[];
+}
 
 const san  = (s:string) => s.replace(/[^a-zA-Z0-9]/g,"_");
 const last = (id:string) => id.split(".").at(-1) ?? id;
@@ -98,19 +103,21 @@ function buildGraph(data:DiffData): {nodes:Node[]; edges:Edge[]} {
 
   const seen = new Set<string>();
   const edges:Edge[] = [];
-  const addE = (s:string,d:string,style:"solid"|"dashed") => {
-    if (s===d) return;
-    const k=`${s}→${d}`; if (seen.has(k)) return; seen.add(k);
-    edges.push({src:s,dst:d,style});
+  // Edges at function level: callerFid → calleeFid
+  // ELK uses class-level src/dst for layout; SVG uses fids for method anchors
+  const addE = (callerFid:string, calleeFid:string, style:"solid"|"dashed") => {
+    const s=fidMap.get(callerFid), d=fidMap.get(calleeFid);
+    if (!s||!d||s===d) return;
+    const k=`${callerFid}→${calleeFid}`; if (seen.has(k)) return; seen.add(k);
+    edges.push({src:s,dst:d,callerFid,calleeFid,style});
   };
   data.added.forEach(fn => {
-    const src=fidMap.get(fn.function_id); if (!src) return;
-    [...fn.new_calls,...fn.new_callers].forEach(fid => {const d=fidMap.get(fid);if(d)addE(src,d,"solid");});
+    fn.new_calls.forEach(fid    => addE(fn.function_id,fid,"solid"));
+    fn.new_callers.forEach(fid  => addE(fid,fn.function_id,"solid"));
   });
   data.modified.forEach(fn => {
-    const src=fidMap.get(fn.function_id); if (!src) return;
-    fn.calls_added_new.forEach(fid => {const d=fidMap.get(fid);if(d)addE(src,d,"solid");});
-    fn.calls_removed.forEach(fid => {const d=fidMap.get(fid);if(d)addE(src,d,"dashed");});
+    fn.calls_added_new.forEach(fid => addE(fn.function_id,fid,"solid"));
+    fn.calls_removed.forEach(fid   => addE(fn.function_id,fid,"dashed"));
   });
   return {nodes,edges};
 }
@@ -210,9 +217,15 @@ function buildSVG(nodes:Node[], edges:Edge[]): string {
   const p:string[] = [];
   p.push(`<svg id="uml-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalW} ${totalH}" style="width:100%;height:100%;display:block">`);
   p.push(`<defs>
-    <marker id="a-s" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#475569"/></marker>
-    <marker id="a-d" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#f87171"/></marker>
-    <filter id="sh" x="-10%" y="-10%" width="120%" height="120%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="rgba(0,0,0,0.1)"/></filter>
+    <marker id="a-s" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <polygon points="0 0,10 4,0 8" fill="#3b82f6"/>
+    </marker>
+    <marker id="a-d" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <polygon points="0 0,10 4,0 8" fill="#f87171"/>
+    </marker>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="rgba(0,0,0,0.1)"/>
+    </filter>
   </defs>`);
 
   // ── Namespace backgrounds ────────────────────────────────────────────────────
@@ -233,23 +246,46 @@ function buildSVG(nodes:Node[], edges:Edge[]): string {
       <text x="${nx+12}" y="${ny+NS_HDR-9}" font-size="11" font-family="ui-monospace,monospace" font-weight="600" fill="#e2e8f0">📄 ${esc(name)}.py</text>`);
   }
 
-  // ── Edges ────────────────────────────────────────────────────────────────────
+  // Build method-index lookup: fid → {node, rowIndex}
+  const midxMap = new Map<string,{n:Node;i:number}>();
+  nodes.forEach(n => n.methods.forEach((m,i) => midxMap.set(m.fid,{n,i})));
+
+  // Helper: absolute y-centre of a method row
+  const methodY = (n:Node,i:number) => n.y + HDR_H + i*ROW_H + ROW_H/2;
+
+  // ── Edges — anchored to method rows ──────────────────────────────────────────
   for (const e of edges) {
-    const solid = e.style==="solid";
-    const stroke = solid ? "#475569" : "#f87171";
+    const solid  = e.style === "solid";
+    const stroke = solid ? "#3b82f6" : "#f87171";   // blue for calls, red for removed
     const dash   = solid ? "" : `stroke-dasharray="6,3"`;
     const marker = solid ? "a-s" : "a-d";
 
-    if (e.pts && e.pts.length >= 2) {
-      // ELK spline waypoints
-      const d = e.pts.map((pt,i)=>`${i===0?"M":"L"}${pt.x},${pt.y}`).join(" ");
-      p.push(`<path d="${d}" fill="none" stroke="${stroke}" stroke-width="1.5" ${dash} marker-end="url(#${marker})"/>`);
+    // Resolve method-level anchors
+    const callerRef = midxMap.get(e.callerFid);
+    const calleeRef = midxMap.get(e.calleeFid);
+
+    let x1:number, y1:number, x2:number, y2:number;
+    if (callerRef && calleeRef) {
+      // Exit from the right edge of the caller's method row
+      x1 = callerRef.n.x + callerRef.n.w;
+      y1 = methodY(callerRef.n, callerRef.i);
+      // Enter at the left edge of the callee's method row
+      x2 = calleeRef.n.x;
+      y2 = methodY(calleeRef.n, calleeRef.i);
     } else {
-      // Fallback bezier
-      const s=nMap.get(e.src), d=nMap.get(e.dst); if(!s||!d) continue;
-      const x1=s.x+s.w, y1=s.y+s.h/2, x2=d.x, y2=d.y+d.h/2, cx=(x1+x2)/2;
-      p.push(`<path d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}" fill="none" stroke="${stroke}" stroke-width="1.5" ${dash} marker-end="url(#${marker})"/>`);
+      // Fallback: box midpoints
+      const sn=nMap.get(e.src), dn=nMap.get(e.dst); if(!sn||!dn) continue;
+      x1=sn.x+sn.w; y1=sn.y+sn.h/2; x2=dn.x; y2=dn.y+dn.h/2;
     }
+
+    // Cubic bezier: horizontal tangents for clean S-curves
+    const dx = Math.abs(x2-x1);
+    const cx = dx*0.5;
+    const path = x2 >= x1
+      ? `M${x1},${y1} C${x1+cx},${y1} ${x2-cx},${y2} ${x2},${y2}`
+      : `M${x1},${y1} C${x1+40},${y1} ${x1+40},${y1+50} ${(x1+x2)/2},${(y1+y2)/2} S${x2-40},${y2-50} ${x2-40},${y2} ${x2},${y2}`;
+
+    p.push(`<path d="${path}" fill="none" stroke="${stroke}" stroke-width="1.5" opacity="0.85" ${dash} marker-end="url(#${marker})"/>`);
   }
 
   // ── Class nodes ──────────────────────────────────────────────────────────────
